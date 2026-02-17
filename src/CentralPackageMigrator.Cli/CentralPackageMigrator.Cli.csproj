@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <RootNamespace>CentralPackageMigrator.Cli</RootNamespace>
+    <AssemblyName>cpm-migrate</AssemblyName>
+    <Description>CLI tool for migrating .NET solutions to Central Package Management</Description>
+    <PackAsTool>true</PackAsTool>
+    <ToolCommandName>cpm-migrate</ToolCommandName>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\CentralPackageMigrator.Core\CentralPackageMigrator.Core.csproj" />
+    <ProjectReference Include="..\CentralPackageMigrator.Infrastructure\CentralPackageMigrator.Infrastructure.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="System.CommandLine" />
+    <PackageReference Include="Microsoft.Extensions.DependencyInjection" />
+    <PackageReference Include="Microsoft.Extensions.Logging" />
+    <PackageReference Include="Microsoft.Extensions.Logging.Console" />
+  </ItemGroup>
+
+</Project>
