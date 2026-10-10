@@ -31,6 +31,17 @@ jobs:
           name: coverage
           path: '**/coverage.cobertura.xml'
 
+  identity-guard:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Fail on placeholder identity
+        run: |
+          if git grep -nIi 'your-org' -- . ':(exclude).github/workflows/ci.yml'; then
+            echo "::error::Placeholder identity 'your-org' found; use the real repository URL."
+            exit 1
+          fi
+
   format-check:
     runs-on: ubuntu-latest
     steps:

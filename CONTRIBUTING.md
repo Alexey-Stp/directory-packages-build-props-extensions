@@ -10,8 +10,8 @@ Thank you for your interest in contributing to `cpm-migrate`.
 ## Building Locally
 
 ```bash
-git clone https://github.com/your-org/cpm-migrate.git
-cd cpm-migrate
+git clone https://github.com/Alexey-Stp/directory-packages-build-props-extensions.git
+cd directory-packages-build-props-extensions
 dotnet build
 ```
 

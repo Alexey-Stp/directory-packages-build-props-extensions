@@ -33,7 +33,7 @@ All file paths go through validation:
 If you discover a security vulnerability, please report it privately:
 
 1. **Do not** open a public issue
-2. Email: security@your-org.com (or use GitHub Security Advisories)
+2. Report it through [GitHub private vulnerability reporting](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/security/advisories/new)
 3. Include: description, reproduction steps, impact assessment
 4. We will respond within 48 hours
 

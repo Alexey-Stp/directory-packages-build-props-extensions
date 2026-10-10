@@ -1,7 +1,7 @@
 # cpm-migrate — Central Package Management Migration Tool
 
-[![CI](https://github.com/your-org/cpm-migrate/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/cpm-migrate/actions/workflows/ci.yml)
-[![Release](https://github.com/your-org/cpm-migrate/actions/workflows/release.yml/badge.svg)](https://github.com/your-org/cpm-migrate/releases)
+[![CI](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/actions/workflows/ci.yml/badge.svg)](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/actions/workflows/ci.yml)
+[![Release](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/actions/workflows/release.yml/badge.svg)](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A production-grade CLI tool that migrates .NET solutions to [Central Package Management](https://learn.microsoft.com/nuget/consume-packages/central-package-management) (`Directory.Packages.props`).
@@ -52,7 +52,7 @@ cpm-migrate check --build
 
 ### Download Binary (Recommended)
 
-Download the self-contained binary for your platform from [GitHub Releases](https://github.com/your-org/cpm-migrate/releases):
+Download the self-contained binary for your platform from [GitHub Releases](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/releases):
 
 | Platform     | Binary                      |
 |--------------|-----------------------------|
@@ -229,8 +229,8 @@ IDE Extension                    CLI Engine
 ## Building from Source
 
 ```bash
-git clone https://github.com/your-org/cpm-migrate.git
-cd cpm-migrate
+git clone https://github.com/Alexey-Stp/directory-packages-build-props-extensions.git
+cd directory-packages-build-props-extensions
 
 # Build
 dotnet build
