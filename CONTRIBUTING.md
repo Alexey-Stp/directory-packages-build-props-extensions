@@ -36,9 +36,13 @@ dotnet test --filter "Category!=E2E"
 # A single test
 dotnet test --filter "FullyQualifiedName~ExactOutputTests.Merges_new_versions_into_existing_Directory_Packages_props"
 
-# With coverage
-dotnet test --collect:"XPlat Code Coverage"
+# With coverage, merged into one report (same settings as CI)
+dotnet tool restore
+dotnet test --collect:"XPlat Code Coverage" --settings coverage.runsettings --results-directory TestResults
+dotnet reportgenerator "-reports:TestResults/**/coverage.cobertura.xml" "-targetdir:coverage" "-reporttypes:Html;TextSummary"
 ```
+
+CI fails if merged coverage measured on Linux drops below the `COVERAGE_MIN_LINE` / `COVERAGE_MIN_BRANCH` thresholds in [.github/workflows/ci.yml](.github/workflows/ci.yml), or if `dotnet format --verify-no-changes` reports any change.
 
 ## Running the CLI Locally
 

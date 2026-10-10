@@ -8,10 +8,23 @@ on:
   # Release runs the full CI suite on the tagged commit before publishing anything.
   workflow_call:
 
+permissions:
+  contents: read
+
+env:
+  # Merged line/branch coverage (Core, Infrastructure, CLI) measured on Linux must not drop below these.
+  # Baseline when introduced: 85.6% line, 75.5% branch. Raise them as coverage improves.
+  COVERAGE_MIN_LINE: 84
+  COVERAGE_MIN_BRANCH: 74
+
 jobs:
   build-and-test:
     runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+      checks: write # test result reporting
     strategy:
+      fail-fast: false
       matrix:
         os: [ubuntu-latest, windows-latest, macos-latest]
     steps:
@@ -26,14 +39,58 @@ jobs:
         run: dotnet restore
       - name: Build
         run: dotnet build --no-restore --configuration Release
+      - name: Restore local tools
+        run: dotnet tool restore
       - name: Test
-        run: dotnet test --no-build --configuration Release --verbosity normal --collect:"XPlat Code Coverage"
+        run: >
+          dotnet test --no-build --configuration Release --verbosity normal
+          --collect:"XPlat Code Coverage" --settings coverage.runsettings
+          --logger "trx;LogFilePrefix=results" --results-directory TestResults
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: TestResults/**/*.trx
+      - name: Publish test results
+        # Fork PRs get a read-only token and cannot create check runs.
+        if: always() && (github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository)
+        uses: dorny/test-reporter@v2
+        with:
+          name: Test results (${{ matrix.os }})
+          path: TestResults/**/*.trx
+          reporter: dotnet-trx
+      - name: Coverage report
+        if: matrix.os == 'ubuntu-latest'
+        run: >
+          dotnet reportgenerator
+          "-reports:TestResults/**/coverage.cobertura.xml"
+          "-targetdir:coverage"
+          "-reporttypes:Cobertura;JsonSummary;MarkdownSummaryGithub"
+      - name: Enforce coverage threshold
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          cat coverage/SummaryGithub.md >> "$GITHUB_STEP_SUMMARY"
+          line=$(jq '.summary.linecoverage' coverage/Summary.json)
+          branch=$(jq '.summary.branchcoverage' coverage/Summary.json)
+          echo "Line coverage: $line% (minimum $COVERAGE_MIN_LINE%)"
+          echo "Branch coverage: $branch% (minimum $COVERAGE_MIN_BRANCH%)"
+          failed=0
+          if awk -v v="$line" -v min="$COVERAGE_MIN_LINE" 'BEGIN { exit !(v < min) }'; then
+            echo "::error::Line coverage $line% is below the $COVERAGE_MIN_LINE% threshold."
+            failed=1
+          fi
+          if awk -v v="$branch" -v min="$COVERAGE_MIN_BRANCH" 'BEGIN { exit !(v < min) }'; then
+            echo "::error::Branch coverage $branch% is below the $COVERAGE_MIN_BRANCH% threshold."
+            failed=1
+          fi
+          exit "$failed"
       - name: Upload coverage
         if: matrix.os == 'ubuntu-latest'
         uses: actions/upload-artifact@v4
         with:
           name: coverage
-          path: '**/coverage.cobertura.xml'
+          path: coverage/
 
   identity-guard:
     runs-on: ubuntu-latest
