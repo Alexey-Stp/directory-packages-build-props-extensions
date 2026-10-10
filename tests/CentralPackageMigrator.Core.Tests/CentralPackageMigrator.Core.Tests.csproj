@@ -8,6 +8,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\CentralPackageMigrator.Core\CentralPackageMigrator.Core.csproj" />
+    <ProjectReference Include="..\CentralPackageMigrator.TestUtilities\CentralPackageMigrator.TestUtilities.csproj" />
   </ItemGroup>
 
   <ItemGroup>

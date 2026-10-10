@@ -1,6 +1,6 @@
 using CentralPackageMigrator.Core.Models;
 using CentralPackageMigrator.Core.Services;
-using CentralPackageMigrator.Core.Tests.TestHelpers;
+using CentralPackageMigrator.TestUtilities;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -122,7 +122,7 @@ public sealed class MigrationPlannerTests
     public void Generates_warning_for_existing_DirectoryPackagesProps()
     {
         string root = Path.GetFullPath("/repo");
-        _fs.AddDirectory(root);
+        _fs.AddFile(Path.Combine(root, "Directory.Packages.props"), "<Project />");
 
         var solution = new SolutionInfo
         {
@@ -232,7 +232,7 @@ public sealed class MigrationPlannerTests
         var solution = MakeSolution(MakeProject("A", ("Newtonsoft.Json", "13.0.3")));
         var plan = _sut.CreatePlan(solution, []);
 
-        plan.SchemaVersion.Should().Be("1.0");
+        plan.SchemaVersion.Should().Be(MigrationPlan.CurrentSchemaVersion);
     }
 
     [Fact]

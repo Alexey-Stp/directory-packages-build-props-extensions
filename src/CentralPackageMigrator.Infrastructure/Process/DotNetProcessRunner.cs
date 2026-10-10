@@ -10,8 +10,6 @@ namespace CentralPackageMigrator.Infrastructure.Process;
 /// </summary>
 public sealed class DotNetProcessRunner : IProcessRunner
 {
-    private static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
-
     private readonly ILogger<DotNetProcessRunner> _logger;
 
     public DotNetProcessRunner(ILogger<DotNetProcessRunner> logger)
@@ -21,23 +19,23 @@ public sealed class DotNetProcessRunner : IProcessRunner
 
     public async Task<ProcessResult> RunAsync(
         string command,
-        string arguments,
+        IReadOnlyList<string> arguments,
         string workingDirectory,
+        TimeSpan timeout,
         CancellationToken cancellationToken = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(command);
         ArgumentNullException.ThrowIfNull(arguments);
         ArgumentException.ThrowIfNullOrWhiteSpace(workingDirectory);
 
+        string display = string.Join(' ', arguments);
         _logger.LogDebug(
             "Running process: {Command} {Arguments} in {WorkingDirectory}",
-            command, arguments, workingDirectory);
+            command, display, workingDirectory);
 
-        using var process = new System.Diagnostics.Process();
-        process.StartInfo = new ProcessStartInfo
+        var startInfo = new ProcessStartInfo
         {
             FileName = command,
-            Arguments = arguments,
             WorkingDirectory = workingDirectory,
             RedirectStandardOutput = true,
             RedirectStandardError = true,
@@ -45,8 +43,15 @@ public sealed class DotNetProcessRunner : IProcessRunner
             CreateNoWindow = true
         };
 
+        foreach (string argument in arguments)
+        {
+            startInfo.ArgumentList.Add(argument);
+        }
+
+        using var process = new System.Diagnostics.Process { StartInfo = startInfo };
         using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        timeoutCts.CancelAfter(DefaultTimeout);
+        timeoutCts.CancelAfter(timeout);
+        var stopwatch = Stopwatch.StartNew();
 
         try
         {
@@ -66,20 +71,19 @@ public sealed class DotNetProcessRunner : IProcessRunner
             {
                 ExitCode = process.ExitCode,
                 StandardOutput = stdout,
-                StandardError = stderr
+                StandardError = stderr,
+                Duration = stopwatch.Elapsed
             };
 
             if (result.Success)
             {
-                _logger.LogDebug(
-                    "Process completed successfully: {Command} {Arguments}",
-                    command, arguments);
+                _logger.LogDebug("Process completed successfully: {Command} {Arguments}", command, display);
             }
             else
             {
-                _logger.LogWarning(
-                    "Process exited with code {ExitCode}: {Command} {Arguments}\nStdErr: {StdErr}",
-                    process.ExitCode, command, arguments, stderr);
+                _logger.LogDebug(
+                    "Process exited with code {ExitCode}: {Command} {Arguments}",
+                    process.ExitCode, command, display);
             }
 
             return result;
@@ -89,7 +93,7 @@ public sealed class DotNetProcessRunner : IProcessRunner
             // The timeout fired, not the caller's token.
             _logger.LogError(
                 "Process timed out after {Timeout}s: {Command} {Arguments}",
-                DefaultTimeout.TotalSeconds, command, arguments);
+                timeout.TotalSeconds, command, display);
 
             TryKillProcess(process);
 
@@ -97,31 +101,27 @@ public sealed class DotNetProcessRunner : IProcessRunner
             {
                 ExitCode = -1,
                 StandardOutput = string.Empty,
-                StandardError = $"Process timed out after {DefaultTimeout.TotalSeconds} seconds."
+                StandardError = $"Process timed out after {timeout.TotalSeconds} seconds.",
+                TimedOut = true,
+                Duration = stopwatch.Elapsed
             };
         }
         catch (OperationCanceledException)
         {
-            _logger.LogInformation(
-                "Process cancelled by caller: {Command} {Arguments}",
-                command, arguments);
-
+            _logger.LogInformation("Process cancelled by caller: {Command} {Arguments}", command, display);
             TryKillProcess(process);
-
             throw;
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogError(
-                ex,
-                "Failed to run process: {Command} {Arguments}",
-                command, arguments);
+            _logger.LogError(ex, "Failed to run process: {Command} {Arguments}", command, display);
 
             return new ProcessResult
             {
                 ExitCode = -1,
                 StandardOutput = string.Empty,
-                StandardError = ex.Message
+                StandardError = ex.Message,
+                Duration = stopwatch.Elapsed
             };
         }
     }
@@ -137,7 +137,7 @@ public sealed class DotNetProcessRunner : IProcessRunner
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            _logger.LogWarning(ex, "Failed to kill timed-out process");
+            _logger.LogWarning(ex, "Failed to kill process");
         }
     }
 }

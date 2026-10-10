@@ -1,5 +1,5 @@
 using CentralPackageMigrator.Core.Services;
-using CentralPackageMigrator.Core.Tests.TestHelpers;
+using CentralPackageMigrator.TestUtilities;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -311,5 +311,67 @@ public sealed class PackageCollectorTests
 
         // Assert
         result.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Extracts_VersionOverride()
+    {
+        _fs.AddFile(ProjectPath, """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup>
+                <PackageReference Include="Newtonsoft.Json" VersionOverride="12.0.3" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        var result = _sut.CollectFromProject(ProjectPath, SolutionRoot);
+
+        result.Should().ContainSingle().Which.VersionOverride.Should().Be("12.0.3");
+        result[0].IsCentralizable.Should().BeFalse();
+    }
+
+    [Fact]
+    public void Inherits_the_ItemGroup_condition()
+    {
+        _fs.AddFile(ProjectPath, """
+            <Project Sdk="Microsoft.NET.Sdk">
+              <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+                <PackageReference Include="A" Version="1.0.0" />
+                <PackageReference Include="B" Version="1.0.0" Condition="'$(X)' == 'y'" />
+              </ItemGroup>
+            </Project>
+            """);
+
+        var result = _sut.CollectFromProject(ProjectPath, SolutionRoot);
+
+        result[0].Condition.Should().Be("'$(TargetFramework)' == 'net48'");
+        result[1].Condition.Should().Be("('$(TargetFramework)' == 'net48') And ('$(X)' == 'y')");
+    }
+
+    [Fact]
+    public void Resolves_property_versions_from_project_and_inherited_properties()
+    {
+        var document = System.Xml.Linq.XDocument.Parse("""
+            <Project Sdk="Microsoft.NET.Sdk">
+              <PropertyGroup>
+                <Major>3</Major>
+                <SerilogVersion>$(Major).1.1</SerilogVersion>
+              </PropertyGroup>
+              <ItemGroup>
+                <PackageReference Include="Serilog" Version="$(SerilogVersion)" />
+                <PackageReference Include="Polly" Version="$(PollyVersion)" />
+                <PackageReference Include="Missing" Version="$(Nope)" />
+              </ItemGroup>
+            </Project>
+            """, System.Xml.Linq.LoadOptions.SetLineInfo);
+        var inherited = new Dictionary<string, string> { ["PollyVersion"] = "8.0.0" };
+
+        var result = _sut.CollectFromDocument(document, "A.csproj", inherited);
+
+        result[0].EffectiveVersion.Should().Be("3.1.1");
+        result[0].Version.Should().Be("$(SerilogVersion)");
+        result[1].EffectiveVersion.Should().Be("8.0.0");
+        result[2].EffectiveVersion.Should().Be("$(Nope)");
+        result[2].HasUnresolvedProperty.Should().BeTrue();
     }
 }

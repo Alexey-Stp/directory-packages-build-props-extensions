@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="utf-8"?>
+<Project Sdk="Microsoft.NET.Sdk">
+
+    <PropertyGroup>
+        <TargetFrameworks>net48;net8.0</TargetFrameworks>
+    </PropertyGroup>
+
+    <!-- Runtime dependencies -->
+    <ItemGroup>
+        <PackageReference Include="Serilog" />
+        <PackageReference Include="Newtonsoft.Json" />
+        <PackageReference Include="Polly"
+                          PrivateAssets="all" />
+        <PackageReference Include="Humanizer" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net48'">
+        <PackageReference Include="System.Memory" />
+    </ItemGroup>
+
+    <ItemGroup Condition="'$(TargetFramework)' == 'net8.0'">
+        <PackageReference Include="System.Memory" />
+    </ItemGroup>
+
+</Project>

@@ -30,6 +30,12 @@ dotnet test tests/CentralPackageMigrator.Golden.Tests
 # Integration tests
 dotnet test tests/CentralPackageMigrator.Integration.Tests
 
+# Everything except the end-to-end test that runs a real dotnet restore (needs NuGet access)
+dotnet test --filter "Category!=E2E"
+
+# A single test
+dotnet test --filter "FullyQualifiedName~ExactOutputTests.Merges_new_versions_into_existing_Directory_Packages_props"
+
 # With coverage
 dotnet test --collect:"XPlat Code Coverage"
 ```
@@ -90,9 +96,9 @@ dotnet publish src/CentralPackageMigrator.Cli -c Release --self-contained -r win
 
 ## Adding Test Scenarios
 
-To add a new golden file test:
+Prefer exact assertions on file content over `Contain(...)`: substring checks let formatting regressions through.
 
-1. Create a new directory under `tests/CentralPackageMigrator.Golden.Tests/TestData/`
-2. Add `.csproj` files representing the scenario
-3. Add a test method in `GoldenFileTests.cs` using `LoadScenario("your-scenario")`
-4. Assert on the expected plan output
+- **Formatting cases:** add input to `tests/CentralPackageMigrator.Golden.Tests/TestData/formatting-snapshot/input/` and the exact migrated result to `.../expected/`. The snapshot test compares every file byte for byte.
+- **New golden scenarios:** create a directory under `TestData/`, add project files, and add a test in `GoldenFileTests.cs` using `LoadScenario("your-scenario")`.
+- **Unit tests:** use `InMemoryFileSystem`, `FixedTimeProvider` and `Pipeline` from `tests/CentralPackageMigrator.TestUtilities`.
+- **CLI behaviour:** call `Program.RunAsync(args, stdout, stderr, configureServices, workingDirectory)` as in `CliContractTests`; substitute `IProcessRunner` through `configureServices`.

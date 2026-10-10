@@ -1,3 +1,4 @@
+using System.Text;
 using CentralPackageMigrator.Core.Abstractions;
 
 namespace CentralPackageMigrator.Infrastructure.FileSystem;
@@ -9,6 +10,8 @@ namespace CentralPackageMigrator.Infrastructure.FileSystem;
 /// </summary>
 public sealed class PhysicalFileSystem : IFileSystem
 {
+    private static readonly byte[] Utf8Bom = [0xEF, 0xBB, 0xBF];
+
     public bool FileExists(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -39,7 +42,15 @@ public sealed class PhysicalFileSystem : IFileSystem
             Directory.CreateDirectory(directory);
         }
 
-        File.WriteAllText(path, content);
+        // Keep the existing file's byte-order mark so edits don't produce encoding-only diffs.
+        bool writeBom = File.Exists(path) && StartsWithUtf8Bom(path);
+        File.WriteAllText(path, content, new UTF8Encoding(encoderShouldEmitUTF8Identifier: writeBom));
+    }
+
+    public void DeleteFile(string path)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        File.Delete(path);
     }
 
     public IEnumerable<string> EnumerateFiles(string directory, string searchPattern, SearchOption searchOption)
@@ -97,5 +108,13 @@ public sealed class PhysicalFileSystem : IFileSystem
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         DirectoryInfo? parent = Directory.GetParent(path);
         return parent?.FullName;
+    }
+
+    private static bool StartsWithUtf8Bom(string path)
+    {
+        Span<byte> buffer = stackalloc byte[3];
+        using var stream = File.OpenRead(path);
+        int read = stream.ReadAtLeast(buffer, buffer.Length, throwOnEndOfStream: false);
+        return read == 3 && buffer.SequenceEqual(Utf8Bom);
     }
 }

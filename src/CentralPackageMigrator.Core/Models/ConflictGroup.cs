@@ -13,6 +13,12 @@ public sealed record ConflictGroup
 
     /// <summary>The resolved version, if a resolution has been provided.</summary>
     public string? ResolvedVersion { get; init; }
+
+    /// <summary>
+    /// The highest version among the entries, offered as a default resolution.
+    /// Null when the versions cannot all be parsed as NuGet versions.
+    /// </summary>
+    public string? SuggestedVersion { get; init; }
 }
 
 /// <summary>
@@ -23,6 +29,9 @@ public sealed record ConflictEntry
     /// <summary>The version string.</summary>
     public required string Version { get; init; }
 
-    /// <summary>Projects that use this version (relative paths).</summary>
+    /// <summary>
+    /// Files that use this version (relative paths). An existing central version
+    /// is reported with the path of Directory.Packages.props.
+    /// </summary>
     public required IReadOnlyList<string> Projects { get; init; }
 }

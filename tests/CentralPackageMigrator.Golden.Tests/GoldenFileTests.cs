@@ -1,6 +1,6 @@
 using CentralPackageMigrator.Core.Models;
 using CentralPackageMigrator.Core.Services;
-using CentralPackageMigrator.Golden.Tests.TestHelpers;
+using CentralPackageMigrator.TestUtilities;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -165,6 +165,34 @@ public sealed class GoldenFileTests
         var plan = planner.CreatePlan(solution, []);
 
         plan.Warnings.Should().Contain(w => w.Code == WarningCodes.ExistingDirectoryPackagesProps);
+    }
+
+    /// <summary>
+    /// Migrates TestData/formatting-snapshot/input and compares every resulting file with
+    /// TestData/formatting-snapshot/expected, byte for byte. To add a case, edit both trees.
+    /// </summary>
+    [Fact]
+    public void FormattingSnapshot_MatchesExpectedFilesExactly()
+    {
+        const string scenario = "formatting-snapshot";
+        var fs = LoadScenario(Path.Combine(scenario, "input"));
+        string root = Path.GetFullPath($"/test/{scenario}/input");
+        var pipeline = new Pipeline(fs);
+
+        var result = pipeline.Service.Apply(Pipeline.RequestFor(root), dryRun: false);
+
+        result.Plan.HasUnresolvedConflicts.Should().BeFalse();
+        string expectedDir = Path.Combine(TestDataRoot, scenario, "expected");
+        var expectedFiles = Directory.EnumerateFiles(expectedDir, "*", SearchOption.AllDirectories).ToList();
+
+        foreach (string expectedFile in expectedFiles)
+        {
+            string relativePath = Path.GetRelativePath(expectedDir, expectedFile);
+            string actual = fs.GetFileContent(Path.Combine(root, relativePath));
+            actual.Should().Be(File.ReadAllText(expectedFile), $"{relativePath} should match the expected snapshot");
+        }
+
+        fs.EnumerateFiles(root, "*", SearchOption.AllDirectories).Should().HaveCount(expectedFiles.Count);
     }
 
     /// <summary>

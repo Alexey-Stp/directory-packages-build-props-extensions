@@ -1,6 +1,8 @@
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 using CentralPackageMigrator.Core.Abstractions;
+using CentralPackageMigrator.Core.Editing;
 using CentralPackageMigrator.Core.Models;
 using Microsoft.Extensions.Logging;
 
@@ -8,21 +10,24 @@ namespace CentralPackageMigrator.Core.Services;
 
 public sealed class MigrationPlanner : IMigrationPlanner
 {
-    private const string SchemaVersionValue = "1.0";
     private const string DirectoryPackagesPropsFileName = "Directory.Packages.props";
+    private const string DirectoryBuildPropsFileName = "Directory.Build.props";
 
     private readonly IConflictDetector _conflictDetector;
     private readonly IFileSystem _fileSystem;
     private readonly ILogger<MigrationPlanner> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public MigrationPlanner(
         IConflictDetector conflictDetector,
         IFileSystem fileSystem,
-        ILogger<MigrationPlanner> logger)
+        ILogger<MigrationPlanner> logger,
+        TimeProvider? timeProvider = null)
     {
         _conflictDetector = conflictDetector;
         _fileSystem = fileSystem;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public MigrationPlan CreatePlan(
@@ -34,56 +39,76 @@ public sealed class MigrationPlanner : IMigrationPlanner
 
         _logger.LogInformation("Creating migration plan for: {Root}", solution.RootPath);
 
-        var sdkProjects = solution.Projects.Where(p => p.IsSdkStyle).ToList();
-        var legacyProjects = solution.Projects.Where(p => !p.IsSdkStyle).ToList();
+        var migratable = solution.Projects.Where(p => p.IsMigratable).ToList();
+        var central = ReadExistingCentralFile(solution.RootPath);
 
-        // Detect conflicts
-        var rawConflicts = _conflictDetector.DetectConflicts(solution.Projects);
-        var conflicts = ApplyResolutions(rawConflicts, resolutions);
+        // Detect conflicts, including mismatches with an existing Directory.Packages.props
+        var rawConflicts = _conflictDetector.DetectConflicts(solution.Projects, central?.UnconditionalVersions);
+        var conflicts = ApplyResolutions(rawConflicts, resolutions, out var unusedResolutions);
 
-        // Collect warnings
-        var warnings = CollectWarnings(solution, legacyProjects, sdkProjects);
+        var entries = BuildCentralEntries(solution.Projects, conflicts, central, out var existingConditionalOnly);
+        bool cpmEnabledElsewhere = IsCentralManagementEnabledByBuildProps(solution);
 
-        // Build the package version map (package -> version)
-        var packageVersionMap = BuildPackageVersionMap(sdkProjects, conflicts);
+        var creates = new List<FileCreate>();
+        var edits = new List<FileEdit>();
+        bool enablesCentralManagement = false;
 
-        // Generate creates and edits
-        var creates = GenerateCreates(solution, packageVersionMap);
-        var edits = GenerateEdits(sdkProjects, solution.RootPath);
+        if (central is null)
+        {
+            if (entries.Count > 0)
+            {
+                string newLine = migratable.FirstOrDefault()?.NewLine ?? Environment.NewLine;
+                creates.Add(new FileCreate
+                {
+                    RelativePath = DirectoryPackagesPropsFileName,
+                    Content = GenerateDirectoryPackagesProps(entries, newLine),
+                    Description = "Central Package Management file with all package versions"
+                });
+            }
+        }
+        else
+        {
+            var centralEdit = PlanCentralFileEdit(central, entries, cpmEnabledElsewhere, migratable);
+            if (centralEdit is not null)
+            {
+                edits.Add(centralEdit);
+                enablesCentralManagement = centralEdit.Operations
+                    .Any(o => o.Type == EditOperationType.EnableCentralPackageManagement);
+            }
+        }
 
-        // Calculate stats
-        int totalPackageRefs = sdkProjects.Sum(p => p.PackageReferences.Count);
-        int versionsRemoved = sdkProjects
-            .SelectMany(p => p.PackageReferences)
-            .Count(r => r.Version is not null && !r.IsUpdate);
+        edits.AddRange(GenerateProjectEdits(migratable));
+
+        var warnings = CollectWarnings(
+            solution, central is not null, unusedResolutions, existingConditionalOnly, enablesCentralManagement, entries);
 
         var stats = new MigrationStats
         {
-            TotalProjects = solution.Projects.Count,
-            SdkStyleProjects = sdkProjects.Count,
-            LegacyProjects = legacyProjects.Count,
-            TotalPackageReferences = totalPackageRefs,
-            UniquePackages = packageVersionMap.Count,
+            TotalProjects = solution.Projects.Count(p => p.Kind == ProjectKind.Project),
+            SdkStyleProjects = solution.Projects.Count(p => p.Kind == ProjectKind.Project && p.IsSdkStyle),
+            LegacyProjects = solution.Projects.Count(p => p.Kind == ProjectKind.Project && !p.IsSdkStyle && p.ParseError is null && !p.IsOutsideRoot),
+            TotalPackageReferences = migratable.Sum(p => p.PackageReferences.Count),
+            UniquePackages = entries.Select(e => e.Package).Distinct().Count(),
             ConflictCount = rawConflicts.Count,
             FilesCreated = creates.Count,
             FilesModified = edits.Count,
-            VersionsRemoved = versionsRemoved
+            VersionsRemoved = migratable.SelectMany(p => p.PackageReferences).Count(r => r.IsCentralizable)
         };
 
         var plan = new MigrationPlan
         {
-            SchemaVersion = SchemaVersionValue,
-            Timestamp = DateTimeOffset.UtcNow,
+            SchemaVersion = MigrationPlan.CurrentSchemaVersion,
+            Timestamp = _timeProvider.GetUtcNow(),
             SolutionRoot = solution.RootPath,
-            Creates = creates,
-            Edits = edits,
+            Creates = creates.AsReadOnly(),
+            Edits = edits.AsReadOnly(),
             Conflicts = conflicts,
-            Warnings = warnings,
+            Warnings = warnings.AsReadOnly(),
             Stats = stats
         };
 
         _logger.LogInformation(
-            "Plan created: {Creates} file(s) to create, {Edits} file(s) to edit, {Conflicts} conflict(s)",
+            "Plan created: {Creates} file(s) to create, {Edits} file(s) to edit, {Conflicts} unresolved conflict(s)",
             creates.Count, edits.Count, conflicts.Count(c => c.ResolvedVersion is null));
 
         return plan;
@@ -91,241 +116,411 @@ public sealed class MigrationPlanner : IMigrationPlanner
 
     private static IReadOnlyList<ConflictGroup> ApplyResolutions(
         IReadOnlyList<ConflictGroup> conflicts,
-        IReadOnlyList<ConflictResolution> resolutions)
+        IReadOnlyList<ConflictResolution> resolutions,
+        out List<ConflictResolution> unused)
     {
-        var resolutionMap = resolutions
-            .ToDictionary(
-                r => r.PackageId,
-                r => r.Version,
-                StringComparer.OrdinalIgnoreCase);
+        var resolutionMap = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var resolution in resolutions)
+        {
+            resolutionMap[resolution.PackageId] = resolution.Version;
+        }
+
+        unused = resolutions
+            .Where(r => !conflicts.Any(c => string.Equals(c.Package.Id, r.PackageId, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
 
         return conflicts
-            .Select(c =>
-            {
-                if (resolutionMap.TryGetValue(c.Package.Id, out string? resolvedVersion))
-                {
-                    return c with { ResolvedVersion = resolvedVersion };
-                }
-                return c;
-            })
+            .Select(c => resolutionMap.TryGetValue(c.Package.Id, out string? resolvedVersion)
+                ? c with { ResolvedVersion = resolvedVersion }
+                : c)
             .ToList()
             .AsReadOnly();
     }
 
-    private List<MigrationWarning> CollectWarnings(
+    /// <summary>
+    /// Decides the central version(s) for every package whose versions can be centralized.
+    /// Packages with unresolved conflicts are left out.
+    /// </summary>
+    private static List<CentralEntry> BuildCentralEntries(
+        IReadOnlyList<ProjectInfo> projects,
+        IReadOnlyList<ConflictGroup> conflicts,
+        ExistingCentralFile? central,
+        out List<PackageIdentity> existingConditionalOnly)
+    {
+        var resolved = conflicts
+            .Where(c => c.ResolvedVersion is not null)
+            .ToDictionary(c => c.Package, c => c.ResolvedVersion!);
+
+        var unresolved = conflicts
+            .Where(c => c.ResolvedVersion is null)
+            .Select(c => c.Package)
+            .ToHashSet();
+
+        var entries = new List<CentralEntry>();
+        existingConditionalOnly = [];
+
+        foreach (var group in PackageVersionAnalyzer.GroupCentralizable(projects))
+        {
+            var package = group.Key;
+            if (unresolved.Contains(package))
+            {
+                continue;
+            }
+
+            if (central?.ConditionalOnly.Contains(package) == true)
+            {
+                existingConditionalOnly.Add(package);
+                continue;
+            }
+
+            if (resolved.TryGetValue(package, out string? resolvedVersion))
+            {
+                entries.Add(new CentralEntry(package, resolvedVersion, null));
+                continue;
+            }
+
+            string? existing = null;
+            central?.UnconditionalVersions.TryGetValue(package, out existing);
+
+            var decision = PackageVersionAnalyzer.Decide(package, group.ToList(), existing);
+            switch (decision.Kind)
+            {
+                case DecisionKind.Single:
+                    entries.Add(new CentralEntry(package, decision.Version!, null));
+                    break;
+
+                case DecisionKind.Conditional:
+                    entries.AddRange(decision.ConditionalVersions.Select(cv => new CentralEntry(package, cv.Version, cv.Condition)));
+                    break;
+            }
+        }
+
+        return entries
+            .OrderBy(e => e.Package.Id, StringComparer.OrdinalIgnoreCase)
+            .ThenBy(e => e.Condition ?? string.Empty, StringComparer.Ordinal)
+            .ToList();
+    }
+
+    private static FileEdit? PlanCentralFileEdit(
+        ExistingCentralFile central,
+        List<CentralEntry> entries,
+        bool cpmEnabledElsewhere,
+        List<ProjectInfo> migratable)
+    {
+        var operations = new List<EditOperation>();
+
+        foreach (var entry in entries)
+        {
+            bool hasExisting = central.UnconditionalVersions.TryGetValue(entry.Package, out string? existing);
+
+            if (entry.Condition is null && hasExisting)
+            {
+                if (!PackageVersionAnalyzer.AreEquivalent(existing!, entry.Version))
+                {
+                    operations.Add(new EditOperation
+                    {
+                        Type = EditOperationType.UpdatePackageVersion,
+                        PackageId = entry.Package.Id,
+                        OriginalText = existing,
+                        Version = entry.Version,
+                        Description = $"Change PackageVersion {entry.Package.Id} from {existing} to {entry.Version}"
+                    });
+                }
+
+                continue;
+            }
+
+            operations.Add(new EditOperation
+            {
+                Type = EditOperationType.AddPackageVersion,
+                PackageId = entry.Package.Id,
+                Version = entry.Version,
+                Condition = entry.Condition,
+                Description = entry.Condition is null
+                    ? $"Add PackageVersion {entry.Package.Id} {entry.Version}"
+                    : $"Add PackageVersion {entry.Package.Id} {entry.Version} when {entry.Condition}"
+            });
+        }
+
+        bool needsCpm = operations.Count > 0 || migratable.Any(p => p.PackageReferences.Any(r => r.IsCentralizable));
+        if (!central.ManagesCentrally && !cpmEnabledElsewhere && needsCpm)
+        {
+            operations.Insert(0, new EditOperation
+            {
+                Type = EditOperationType.EnableCentralPackageManagement,
+                Description = "Set ManagePackageVersionsCentrally to true"
+            });
+        }
+
+        if (operations.Count == 0)
+        {
+            return null;
+        }
+
+        return new FileEdit
+        {
+            RelativePath = DirectoryPackagesPropsFileName,
+            OriginalSha256 = central.Sha256,
+            Operations = operations.AsReadOnly()
+        };
+    }
+
+    private static IEnumerable<FileEdit> GenerateProjectEdits(List<ProjectInfo> migratable)
+    {
+        foreach (var project in migratable)
+        {
+            var operations = project.PackageReferences
+                .Where(r => r.IsCentralizable)
+                .Select(r => new EditOperation
+                {
+                    Type = EditOperationType.RemoveVersion,
+                    Line = r.Line,
+                    PackageId = r.Package.Id,
+                    OriginalText = r.Version,
+                    Description = $"Remove Version=\"{r.Version}\" from {r.Package.Id}"
+                })
+                .OrderByDescending(o => o.Line)
+                .ToList();
+
+            if (operations.Count == 0)
+            {
+                continue;
+            }
+
+            yield return new FileEdit
+            {
+                RelativePath = project.RelativePath,
+                OriginalSha256 = project.ContentSha256,
+                Operations = operations.AsReadOnly()
+            };
+        }
+    }
+
+    private static List<MigrationWarning> CollectWarnings(
         SolutionInfo solution,
-        List<ProjectInfo> legacyProjects,
-        List<ProjectInfo> sdkProjects)
+        bool hasExistingCentralFile,
+        List<ConflictResolution> unusedResolutions,
+        List<PackageIdentity> existingConditionalOnly,
+        bool enablesCentralManagement,
+        List<CentralEntry> entries)
     {
         var warnings = new List<MigrationWarning>();
+        var conditionalPackages = entries.Where(e => e.Condition is not null).Select(e => e.Package).ToHashSet();
 
-        // Warn about legacy projects
-        foreach (var legacy in legacyProjects)
+        foreach (var project in solution.Projects)
         {
-            warnings.Add(new MigrationWarning
+            if (project.IsOutsideRoot)
             {
-                Code = WarningCodes.LegacyProjectFormat,
-                Message = $"Legacy project format detected — will be skipped: {legacy.RelativePath}",
-                ProjectPath = legacy.RelativePath
-            });
-        }
-
-        // Warn about existing Directory.Packages.props
-        if (solution.HasExistingDirectoryPackagesProps)
-        {
-            warnings.Add(new MigrationWarning
+                warnings.Add(Warning(WarningCodes.ProjectOutsideRoot,
+                    $"Project is listed in the solution but outside the root; Directory.Packages.props will not apply to it: {project.RelativePath}",
+                    project.RelativePath));
+            }
+            else if (project.ParseError is not null)
             {
-                Code = WarningCodes.ExistingDirectoryPackagesProps,
-                Message = "An existing Directory.Packages.props was found and will be overwritten"
-            });
-        }
-
-        // Warn about projects with no package references
-        foreach (var project in sdkProjects.Where(p => p.PackageReferences.Count == 0))
-        {
-            warnings.Add(new MigrationWarning
+                warnings.Add(Warning(WarningCodes.MalformedXml,
+                    $"Could not parse {project.RelativePath}; it will be skipped: {project.ParseError}",
+                    project.RelativePath));
+            }
+            else if (!project.IsSdkStyle)
             {
-                Code = WarningCodes.NoPackageReferences,
-                Message = $"No PackageReference elements found in: {project.RelativePath}",
-                ProjectPath = project.RelativePath
-            });
-        }
-
-        // Warn about Update= references
-        foreach (var project in sdkProjects)
-        {
-            foreach (var updateRef in project.PackageReferences.Where(r => r.IsUpdate))
-            {
-                warnings.Add(new MigrationWarning
-                {
-                    Code = WarningCodes.UpdateReferenceDetected,
-                    Message = $"Update= PackageReference for '{updateRef.Package.Id}' in {project.RelativePath} — version will not be centralized",
-                    ProjectPath = project.RelativePath,
-                    PackageId = updateRef.Package.Id
-                });
+                warnings.Add(Warning(WarningCodes.LegacyProjectFormat,
+                    $"Legacy project format detected — will be skipped: {project.RelativePath}",
+                    project.RelativePath));
             }
         }
 
-        // Warn about conditional version references
-        foreach (var project in sdkProjects)
+        if (hasExistingCentralFile)
         {
-            foreach (var condRef in project.PackageReferences.Where(r => r.Condition is not null && r.Version is not null))
+            warnings.Add(Info(WarningCodes.ExistingDirectoryPackagesProps,
+                "An existing Directory.Packages.props was found; new versions will be merged into it"));
+        }
+
+        if (enablesCentralManagement)
+        {
+            warnings.Add(Info(WarningCodes.CentralManagementEnabled,
+                "ManagePackageVersionsCentrally is not enabled; it will be set to true in Directory.Packages.props"));
+        }
+
+        foreach (var project in solution.Projects.Where(p => p.IsMigratable))
+        {
+            if (project.Kind == ProjectKind.Project && project.PackageReferences.Count == 0)
             {
-                warnings.Add(new MigrationWarning
-                {
-                    Code = WarningCodes.ConditionalVersionReference,
-                    Message = $"Conditional PackageReference for '{condRef.Package.Id}' in {project.RelativePath} with Condition='{condRef.Condition}'",
-                    ProjectPath = project.RelativePath,
-                    PackageId = condRef.Package.Id
-                });
+                warnings.Add(Info(WarningCodes.NoPackageReferences,
+                    $"No PackageReference elements found in: {project.RelativePath}",
+                    project.RelativePath));
+            }
+
+            if (project.Kind == ProjectKind.Project && project.AlreadyUsesCentralManagement)
+            {
+                warnings.Add(Info(WarningCodes.ExistingCentralManagement,
+                    $"Project already uses central package management: {project.RelativePath}",
+                    project.RelativePath));
+            }
+
+            foreach (var reference in project.PackageReferences)
+            {
+                AddReferenceWarnings(warnings, project, reference, conditionalPackages);
             }
         }
 
-        // Warn about projects already using CPM
-        foreach (var project in sdkProjects.Where(p => p.AlreadyUsesCentralManagement))
+        foreach (var package in existingConditionalOnly)
         {
-            warnings.Add(new MigrationWarning
-            {
-                Code = WarningCodes.ExistingCentralManagement,
-                Message = $"Project already uses central package management: {project.RelativePath}",
-                ProjectPath = project.RelativePath
-            });
+            warnings.Add(Warning(WarningCodes.ExistingConditionalPackageVersion,
+                $"Directory.Packages.props only has conditional PackageVersion items for '{package.Id}'; verify they cover every project",
+                packageId: package.Id));
+        }
+
+        foreach (var resolution in unusedResolutions)
+        {
+            warnings.Add(Warning(WarningCodes.UnusedResolution,
+                $"Resolution '{resolution.PackageId}={resolution.Version}' was ignored: the package has no version conflict",
+                packageId: resolution.PackageId));
         }
 
         return warnings;
     }
 
-    private Dictionary<PackageIdentity, string> BuildPackageVersionMap(
-        List<ProjectInfo> sdkProjects,
-        IReadOnlyList<ConflictGroup> conflicts)
+    private static void AddReferenceWarnings(
+        List<MigrationWarning> warnings,
+        ProjectInfo project,
+        PackageReference reference,
+        HashSet<PackageIdentity> conditionalPackages)
     {
-        var map = new Dictionary<PackageIdentity, string>();
+        string id = reference.Package.Id;
 
-        // Build resolution map from conflicts
-        var conflictResolutions = conflicts
-            .Where(c => c.ResolvedVersion is not null)
-            .ToDictionary(c => c.Package, c => c.ResolvedVersion!);
-
-        var unresolvedConflictPackages = conflicts
-            .Where(c => c.ResolvedVersion is null)
-            .Select(c => c.Package)
-            .ToHashSet();
-
-        // Collect all versioned, non-Update references
-        var allRefs = sdkProjects
-            .SelectMany(p => p.PackageReferences)
-            .Where(r => r.Version is not null && !r.IsUpdate)
-            .ToList();
-
-        foreach (var group in allRefs.GroupBy(r => r.Package))
+        if (reference.IsUpdate && reference.Version is not null)
         {
-            var packageId = group.Key;
-
-            // If there's a conflict resolution, use it
-            if (conflictResolutions.TryGetValue(packageId, out string? resolved))
-            {
-                map[packageId] = resolved;
-                continue;
-            }
-
-            // If there's an unresolved conflict, skip (don't add to map)
-            if (unresolvedConflictPackages.Contains(packageId))
-            {
-                continue;
-            }
-
-            // No conflict: all versions are the same
-            string version = group.First().Version!;
-            map[packageId] = version;
+            warnings.Add(Warning(WarningCodes.UpdateReferenceDetected,
+                $"Update= PackageReference for '{id}' in {project.RelativePath} sets a version; it is not centralized and will trigger NU1008 under Central Package Management",
+                project.RelativePath, id));
         }
 
-        return map;
-    }
-
-    private List<FileCreate> GenerateCreates(
-        SolutionInfo solution,
-        Dictionary<PackageIdentity, string> packageVersionMap)
-    {
-        var creates = new List<FileCreate>();
-
-        if (packageVersionMap.Count == 0)
+        if (reference.IsCentralizable && reference.Condition is not null)
         {
-            return creates;
+            string detail = conditionalPackages.Contains(reference.Package)
+                ? "a conditional PackageVersion will be generated"
+                : "the version is centralized unconditionally";
+            warnings.Add(Info(WarningCodes.ConditionalVersionReference,
+                $"Conditional PackageReference for '{id}' in {project.RelativePath} with Condition='{reference.Condition}'; {detail}",
+                project.RelativePath, id));
         }
 
-        string content = GenerateDirectoryPackagesProps(packageVersionMap);
-
-        creates.Add(new FileCreate
+        if (reference.VersionOverride is not null)
         {
-            RelativePath = DirectoryPackagesPropsFileName,
-            Content = content,
-            Description = "Central Package Management file with all package versions"
-        });
+            warnings.Add(Info(WarningCodes.VersionOverrideDetected,
+                $"PackageReference for '{id}' in {project.RelativePath} uses VersionOverride='{reference.VersionOverride}'; it is left unchanged",
+                project.RelativePath, id));
+        }
 
-        return creates;
+        if (reference.IsCentralizable && reference.IsPropertyVersion)
+        {
+            warnings.Add(reference.HasUnresolvedProperty
+                ? Warning(WarningCodes.PropertyBasedVersion,
+                    $"Version '{reference.Version}' of '{id}' in {project.RelativePath} uses a property that could not be resolved; it is copied as-is and must be defined for Directory.Packages.props",
+                    project.RelativePath, id)
+                : Info(WarningCodes.PropertyBasedVersion,
+                    $"Version '{reference.Version}' of '{id}' in {project.RelativePath} was resolved to '{reference.EffectiveVersion}'",
+                    project.RelativePath, id));
+        }
     }
 
-    private static string GenerateDirectoryPackagesProps(
-        Dictionary<PackageIdentity, string> packageVersionMap)
+    private static MigrationWarning Warning(string code, string message, string? projectPath = null, string? packageId = null) =>
+        new() { Code = code, Message = message, Severity = WarningSeverity.Warning, ProjectPath = projectPath, PackageId = packageId };
+
+    private static MigrationWarning Info(string code, string message, string? projectPath = null, string? packageId = null) =>
+        new() { Code = code, Message = message, Severity = WarningSeverity.Info, ProjectPath = projectPath, PackageId = packageId };
+
+    private static string GenerateDirectoryPackagesProps(List<CentralEntry> entries, string newLine)
     {
         var sb = new StringBuilder();
-        sb.AppendLine("<Project>");
-        sb.AppendLine("  <PropertyGroup>");
-        sb.AppendLine("    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>");
-        sb.AppendLine("  </PropertyGroup>");
-        sb.AppendLine();
-        sb.AppendLine("  <ItemGroup>");
+        sb.Append("<Project>").Append(newLine);
+        sb.Append("  <PropertyGroup>").Append(newLine);
+        sb.Append("    <ManagePackageVersionsCentrally>true</ManagePackageVersionsCentrally>").Append(newLine);
+        sb.Append("  </PropertyGroup>").Append(newLine);
+        sb.Append(newLine);
+        sb.Append("  <ItemGroup>").Append(newLine);
 
-        foreach (var kvp in packageVersionMap.OrderBy(k => k.Key.Id, StringComparer.OrdinalIgnoreCase))
+        foreach (var entry in entries)
         {
-            sb.AppendLine($"    <PackageVersion Include=\"{kvp.Key.Id}\" Version=\"{kvp.Value}\" />");
+            sb.Append("    ")
+              .Append(XmlFileEditor.FormatPackageVersion(entry.Package.Id, entry.Version, entry.Condition))
+              .Append(newLine);
         }
 
-        sb.AppendLine("  </ItemGroup>");
-        sb.AppendLine("</Project>");
+        sb.Append("  </ItemGroup>").Append(newLine);
+        sb.Append("</Project>").Append(newLine);
 
         return sb.ToString();
     }
 
-    private List<FileEdit> GenerateEdits(List<ProjectInfo> sdkProjects, string solutionRoot)
+    private static bool IsCentralManagementEnabledByBuildProps(SolutionInfo solution) => solution.Projects.Any(p =>
+        p.Kind == ProjectKind.ImportFile &&
+        string.Equals(p.RelativePath, DirectoryBuildPropsFileName, StringComparison.OrdinalIgnoreCase) &&
+        p.AlreadyUsesCentralManagement);
+
+    private ExistingCentralFile? ReadExistingCentralFile(string rootPath)
     {
-        var edits = new List<FileEdit>();
-
-        foreach (var project in sdkProjects)
+        string path = _fileSystem.Combine(rootPath, DirectoryPackagesPropsFileName);
+        if (!_fileSystem.FileExists(path))
         {
-            var versionedRefs = project.PackageReferences
-                .Where(r => r.Version is not null && !r.IsUpdate)
-                .ToList();
+            return null;
+        }
 
-            if (versionedRefs.Count == 0)
+        string content = _fileSystem.ReadAllText(path);
+        XDocument document;
+        try
+        {
+            document = XDocument.Parse(content);
+        }
+        catch (XmlException ex)
+        {
+            throw new MigrationException(
+                ErrorCodes.MalformedProject,
+                $"Existing {DirectoryPackagesPropsFileName} is not valid XML: {ex.Message}",
+                DirectoryPackagesPropsFileName,
+                ex);
+        }
+
+        var unconditional = new Dictionary<PackageIdentity, string>();
+        var conditional = new HashSet<PackageIdentity>();
+
+        foreach (var item in document.Descendants().Where(e => e.Name.LocalName == "PackageVersion"))
+        {
+            string? id = item.Attribute("Include")?.Value;
+            if (string.IsNullOrWhiteSpace(id))
             {
                 continue;
             }
 
-            var operations = new List<EditOperation>();
+            var package = new PackageIdentity(id.Trim());
+            bool isConditional = item.Attribute("Condition") is not null || item.Parent?.Attribute("Condition") is not null;
+            string? version = item.Attribute("Version")?.Value
+                ?? item.Elements().FirstOrDefault(e => e.Name.LocalName == "Version")?.Value.Trim();
 
-            foreach (var pkgRef in versionedRefs)
+            if (isConditional)
             {
-                operations.Add(new EditOperation
-                {
-                    Type = EditOperationType.RemoveVersion,
-                    Line = pkgRef.Line,
-                    PackageId = pkgRef.Package.Id,
-                    OriginalText = pkgRef.Version,
-                    Description = $"Remove Version=\"{pkgRef.Version}\" from {pkgRef.Package.Id}"
-                });
+                conditional.Add(package);
             }
-
-            edits.Add(new FileEdit
+            else if (version is not null)
             {
-                RelativePath = project.RelativePath,
-                Operations = operations
-                    .OrderByDescending(o => o.Line)
-                    .ToList()
-                    .AsReadOnly()
-            });
+                unconditional[package] = version;
+            }
         }
 
-        return edits;
+        conditional.ExceptWith(unconditional.Keys);
+
+        bool managesCentrally = document.Descendants()
+            .Any(e => e.Name.LocalName == "ManagePackageVersionsCentrally" &&
+                      string.Equals(e.Value.Trim(), "true", StringComparison.OrdinalIgnoreCase));
+
+        return new ExistingCentralFile(TextFormat.Sha256(content), managesCentrally, unconditional, conditional);
     }
+
+    private sealed record CentralEntry(PackageIdentity Package, string Version, string? Condition);
+
+    private sealed record ExistingCentralFile(
+        string Sha256,
+        bool ManagesCentrally,
+        IReadOnlyDictionary<PackageIdentity, string> UnconditionalVersions,
+        IReadOnlySet<PackageIdentity> ConditionalOnly);
 }

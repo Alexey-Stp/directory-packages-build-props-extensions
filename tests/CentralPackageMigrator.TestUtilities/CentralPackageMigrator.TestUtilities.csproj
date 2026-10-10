@@ -1,0 +1,13 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    <RootNamespace>CentralPackageMigrator.TestUtilities</RootNamespace>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\CentralPackageMigrator.Core\CentralPackageMigrator.Core.csproj" />
+  </ItemGroup>
+
+</Project>

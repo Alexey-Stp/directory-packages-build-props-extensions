@@ -11,6 +11,12 @@ public sealed record MigrationWarning
     /// <summary>Human-readable warning message.</summary>
     public required string Message { get; init; }
 
+    /// <summary>
+    /// Severity. <see cref="WarningSeverity.Warning"/> needs attention and makes the CLI exit with
+    /// code 1; <see cref="WarningSeverity.Info"/> is informational only.
+    /// </summary>
+    public WarningSeverity Severity { get; init; } = WarningSeverity.Warning;
+
     /// <summary>Related project path, if applicable.</summary>
     public string? ProjectPath { get; init; }
 
@@ -18,8 +24,14 @@ public sealed record MigrationWarning
     public string? PackageId { get; init; }
 }
 
+public enum WarningSeverity
+{
+    Info,
+    Warning
+}
+
 /// <summary>
-/// Well-known warning codes.
+/// Well-known warning codes. These form part of the stable IDE integration contract.
 /// </summary>
 public static class WarningCodes
 {
@@ -31,4 +43,9 @@ public static class WarningCodes
     public const string UpdateReferenceDetected = "CPM006";
     public const string ExistingDirectoryPackagesProps = "CPM007";
     public const string VersionOverrideDetected = "CPM008";
+    public const string UnusedResolution = "CPM009";
+    public const string ProjectOutsideRoot = "CPM010";
+    public const string PropertyBasedVersion = "CPM011";
+    public const string ExistingConditionalPackageVersion = "CPM012";
+    public const string CentralManagementEnabled = "CPM013";
 }

@@ -6,8 +6,9 @@ using Microsoft.Extensions.Logging;
 namespace CentralPackageMigrator.Infrastructure.Serialization;
 
 /// <summary>
-/// Serializes and deserializes <see cref="MigrationPlan"/> instances to/from JSON.
-/// Produces the stable IDE integration contract format with camelCase property naming.
+/// Serializes and deserializes <see cref="MigrationPlan"/> instances (and the other JSON
+/// outputs of the CLI) to/from JSON, producing the stable IDE integration contract format
+/// with camelCase property naming.
 /// </summary>
 public sealed class PlanSerializer
 {
@@ -28,24 +29,22 @@ public sealed class PlanSerializer
         ArgumentNullException.ThrowIfNull(plan);
 
         _logger.LogDebug("Serializing migration plan (schema {SchemaVersion})", plan.SchemaVersion);
+        return SerializeObject(plan);
+    }
 
-        try
-        {
-            string json = JsonSerializer.Serialize(plan, SerializerOptions);
-
-            _logger.LogDebug("Serialized migration plan ({Length} chars)", json.Length);
-            return json;
-        }
-        catch (JsonException ex)
-        {
-            _logger.LogError(ex, "Failed to serialize migration plan");
-            throw;
-        }
+    /// <summary>
+    /// Serializes any contract object (apply result, check result, error) with the plan's JSON conventions.
+    /// </summary>
+    public string SerializeObject<T>(T value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        return JsonSerializer.Serialize(value, SerializerOptions);
     }
 
     /// <summary>
     /// Deserializes a JSON string to a <see cref="MigrationPlan"/>.
     /// </summary>
+    /// <exception cref="MigrationException">With <see cref="ErrorCodes.InvalidPlanFile"/> when the JSON is not a valid plan.</exception>
     public MigrationPlan Deserialize(string json)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(json);
@@ -54,12 +53,8 @@ public sealed class PlanSerializer
 
         try
         {
-            MigrationPlan? plan = JsonSerializer.Deserialize<MigrationPlan>(json, SerializerOptions);
-
-            if (plan is null)
-            {
-                throw new JsonException("Deserialized MigrationPlan was null.");
-            }
+            MigrationPlan plan = JsonSerializer.Deserialize<MigrationPlan>(json, SerializerOptions)
+                ?? throw new JsonException("Deserialized MigrationPlan was null.");
 
             _logger.LogDebug(
                 "Deserialized migration plan (schema {SchemaVersion}, {Creates} creates, {Edits} edits)",
@@ -69,8 +64,7 @@ public sealed class PlanSerializer
         }
         catch (JsonException ex)
         {
-            _logger.LogError(ex, "Failed to deserialize migration plan from JSON");
-            throw;
+            throw new MigrationException(ErrorCodes.InvalidPlanFile, $"The plan file is not a valid migration plan: {ex.Message}", innerException: ex);
         }
     }
 
@@ -97,7 +91,7 @@ public sealed class PlanSerializer
 
         if (!File.Exists(filePath))
         {
-            throw new FileNotFoundException($"Migration plan file not found: {filePath}", filePath);
+            throw new MigrationException(ErrorCodes.PlanFileNotFound, $"Plan file not found: {filePath}", filePath);
         }
 
         _logger.LogDebug("Reading migration plan from: {FilePath}", filePath);

@@ -8,19 +8,19 @@ public sealed record SolutionInfo
     /// <summary>Absolute path to the solution root directory.</summary>
     public required string RootPath { get; init; }
 
-    /// <summary>Path to the .sln file if one was found.</summary>
+    /// <summary>Path to the .sln or .slnx file if one was found.</summary>
     public string? SolutionFilePath { get; init; }
 
     /// <summary>How the root was detected.</summary>
     public required RootDetectionMethod DetectionMethod { get; init; }
 
-    /// <summary>All discovered projects.</summary>
+    /// <summary>All discovered projects and import files.</summary>
     public IReadOnlyList<ProjectInfo> Projects { get; init; } = [];
 
-    /// <summary>Whether a Directory.Packages.props already exists.</summary>
+    /// <summary>Whether a Directory.Packages.props already exists at the root.</summary>
     public bool HasExistingDirectoryPackagesProps { get; init; }
 
-    /// <summary>Whether a Directory.Build.props already exists.</summary>
+    /// <summary>Whether a Directory.Build.props already exists at the root.</summary>
     public bool HasExistingDirectoryBuildProps { get; init; }
 }
 

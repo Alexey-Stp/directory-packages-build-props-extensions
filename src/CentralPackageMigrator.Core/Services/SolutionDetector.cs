@@ -6,6 +6,8 @@ namespace CentralPackageMigrator.Core.Services;
 
 public sealed class SolutionDetector : ISolutionDetector
 {
+    private const int MaxDepth = 20;
+
     private readonly IFileSystem _fileSystem;
     private readonly ILogger<SolutionDetector> _logger;
 
@@ -15,7 +17,7 @@ public sealed class SolutionDetector : ISolutionDetector
         _logger = logger;
     }
 
-    public SolutionInfo Detect(string startPath)
+    public SolutionInfo Detect(string startPath, bool isExplicitRoot = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(startPath);
 
@@ -26,9 +28,16 @@ public sealed class SolutionDetector : ISolutionDetector
             throw new DirectoryNotFoundException($"Start path does not exist: {fullPath}");
         }
 
+        if (isExplicitRoot)
+        {
+            // An explicit root is authoritative: never walk up to a parent solution or repository.
+            _logger.LogInformation("Using explicit solution root: {Path}", fullPath);
+            return BuildSolutionInfo(fullPath, FindSolutionFileIn(fullPath), RootDetectionMethod.ExplicitPath);
+        }
+
         _logger.LogDebug("Detecting solution root from: {StartPath}", fullPath);
 
-        // Strategy 1: Look for .sln file walking up
+        // Strategy 1: Look for a solution file walking up
         var (slnPath, slnRoot) = FindSolutionFile(fullPath);
         if (slnPath is not null && slnRoot is not null)
         {
@@ -53,26 +62,13 @@ public sealed class SolutionDetector : ISolutionDetector
     {
         string? current = startDir;
         int depth = 0;
-        const int maxDepth = 20;
 
-        while (current is not null && depth < maxDepth)
+        while (current is not null && depth < MaxDepth)
         {
-            var slnFiles = _fileSystem.EnumerateFiles(current, "*.sln", SearchOption.TopDirectoryOnly).ToList();
-
-            if (slnFiles.Count > 0)
+            string? solution = FindSolutionFileIn(current);
+            if (solution is not null)
             {
-                string chosen = slnFiles.Count == 1
-                    ? slnFiles[0]
-                    : slnFiles.OrderBy(f => _fileSystem.GetFileName(f)).First();
-
-                if (slnFiles.Count > 1)
-                {
-                    _logger.LogWarning(
-                        "Multiple .sln files found in {Dir}. Using: {Chosen}",
-                        current, _fileSystem.GetFileName(chosen));
-                }
-
-                return (chosen, current);
+                return (solution, current);
             }
 
             current = _fileSystem.GetParentDirectory(current);
@@ -82,13 +78,37 @@ public sealed class SolutionDetector : ISolutionDetector
         return (null, null);
     }
 
+    private string? FindSolutionFileIn(string directory)
+    {
+        var solutionFiles = _fileSystem.EnumerateFiles(directory, "*.sln", SearchOption.TopDirectoryOnly)
+            .Concat(_fileSystem.EnumerateFiles(directory, "*.slnx", SearchOption.TopDirectoryOnly))
+            .Where(f => f.EndsWith(".sln", StringComparison.OrdinalIgnoreCase) ||
+                        f.EndsWith(".slnx", StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(f => _fileSystem.GetFileName(f), StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        if (solutionFiles.Count == 0)
+        {
+            return null;
+        }
+
+        if (solutionFiles.Count > 1)
+        {
+            _logger.LogWarning(
+                "Multiple solution files found in {Dir}. Using: {Chosen}",
+                directory, _fileSystem.GetFileName(solutionFiles[0]));
+        }
+
+        return solutionFiles[0];
+    }
+
     private string? FindGitRoot(string startDir)
     {
         string? current = startDir;
         int depth = 0;
-        const int maxDepth = 20;
 
-        while (current is not null && depth < maxDepth)
+        while (current is not null && depth < MaxDepth)
         {
             string gitDir = _fileSystem.Combine(current, ".git");
             if (_fileSystem.DirectoryExists(gitDir) || _fileSystem.FileExists(gitDir))

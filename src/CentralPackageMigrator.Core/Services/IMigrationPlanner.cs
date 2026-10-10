@@ -11,7 +11,7 @@ public interface IMigrationPlanner
     /// <summary>
     /// Creates a migration plan for the given solution.
     /// </summary>
-    MigrationPlan CreatePlan(
+    public MigrationPlan CreatePlan(
         SolutionInfo solution,
         IReadOnlyList<ConflictResolution> resolutions);
 }
