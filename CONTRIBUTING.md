@@ -106,3 +106,8 @@ Prefer exact assertions on file content over `Contain(...)`: substring checks le
 - **New golden scenarios:** create a directory under `TestData/`, add project files, and add a test in `GoldenFileTests.cs` using `LoadScenario("your-scenario")`.
 - **Unit tests:** use `InMemoryFileSystem`, `FixedTimeProvider` and `Pipeline` from `tests/CentralPackageMigrator.TestUtilities`.
 - **CLI behaviour:** call `Program.RunAsync(args, stdout, stderr, configureServices, workingDirectory)` as in `CliContractTests`; substitute `IProcessRunner` through `configureServices`.
+- **JSON output:** `Contract/JsonContractTests` snapshots every `--json` output. A shape change must follow the [compatibility rule](docs/JSON_SCHEMA.md#compatibility-rule): bump the schema version, update `docs/schemas`, and regenerate the snapshots with `CPM_UPDATE_CONTRACT=1`.
+
+## Releasing
+
+Maintainers: see [docs/RELEASING.md](docs/RELEASING.md).

@@ -7,6 +7,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.1.0] - TBD
+
+First published release: the `CentralPackageMigrator` dotnet tool on nuget.org, plus signed binaries on GitHub Releases. An untagged 0.1.0 draft dated 2024-12-01 was never published. This entry includes it and the fixes that followed.
+
+### Release and distribution
+
+- Version is taken from the `vX.Y.Z` git tag (MinVer). The assembly version, NuGet package version and `cpm-migrate --version` output are identical. `--version` reports the tool's own version even when the CLI is hosted in-process.
+- Release workflow:
+  - runs the full CI suite on the tagged commit;
+  - publishes the dotnet tool to nuget.org;
+  - attaches self-contained binaries with `SHA256SUMS.txt` and build-provenance attestations to the GitHub Release.
+  - Any mismatch between the tag and an artifact's version fails the release before anything is published.
+- Windows binaries are Authenticode-signed. macOS binaries are signed with a Developer ID and notarized. A release tag never publishes an unsigned Windows or macOS binary.
+- JSON Schemas for every `--json` output are in `docs/schemas/`. Contract tests fail on any change to the JSON shape, and CI requires a `schemaVersion` bump for intentional changes.
+- CI enforces a coverage threshold and `dotnet format`, publishes test results, and rejects placeholder repository URLs.
+- Package metadata added: MIT license, repository URL, README. Security reports go through GitHub private vulnerability reporting.
+
 ### Fixed
 
 - `apply` no longer collapses indentation in every edited project file.
@@ -42,11 +59,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `resolve --dry-run` is deprecated and hidden (it never had an effect).
 - Upgraded System.CommandLine from the 2022 pre-release `2.0.0-beta4.22272.1` to the stable `2.0.12`, pinned exactly in `Directory.Packages.props`. The .NET tool package ID is now explicitly `CentralPackageMigrator`.
 
-## [0.1.0] - 2024-12-01
+### Initial feature set
 
-### Added
-
-- Initial release of the `cpm-migrate` CLI tool.
+- The `cpm-migrate` CLI tool.
 - `analyze` command: scan a .NET solution and report projects, packages, and version conflicts.
 - `plan` command: generate a deterministic migration plan as JSON or human-readable output.
 - `apply` command: execute the migration plan, creating `Directory.Packages.props` and removing inline versions from `.csproj` files.
@@ -59,6 +74,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Solution root auto-detection via `.sln` files, `.git` directories, or explicit `--root` path.
 - Version conflict detection with interactive resolution workflow.
 - Warning system for legacy projects, conditional version references, and malformed XML.
-- Stable JSON schema (v1.0) for IDE integration contract.
+- Versioned JSON schema for the IDE integration contract. It was drafted as 1.0 and is released as 1.1; see Changed.
 - IFileSystem abstraction for fully testable file operations.
 - Three-tier architecture: Core (domain logic), Infrastructure (I/O), CLI (presentation).
+
+[Unreleased]: https://github.com/Alexey-Stp/directory-packages-build-props-extensions/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/Alexey-Stp/directory-packages-build-props-extensions/releases/tag/v0.1.0
