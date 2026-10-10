@@ -1,6 +1,6 @@
 using CentralPackageMigrator.Core.Models;
 using CentralPackageMigrator.Core.Services;
-using CentralPackageMigrator.Core.Tests.TestHelpers;
+using CentralPackageMigrator.TestUtilities;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -142,7 +142,7 @@ public sealed class FileEditEngineTests
 
         var act = () => _sut.Apply(plan);
 
-        act.Should().Throw<InvalidOperationException>()
+        act.Should().Throw<MigrationException>()
             .WithMessage("*unresolved conflicts*");
     }
 
@@ -165,7 +165,7 @@ public sealed class FileEditEngineTests
 
         var act = () => _sut.Apply(plan);
 
-        act.Should().Throw<InvalidOperationException>()
+        act.Should().Throw<MigrationException>()
             .WithMessage("*Path*");
     }
 

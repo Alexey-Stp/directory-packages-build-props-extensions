@@ -1,0 +1,6 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <ItemGroup>
+    <PackageReference Include="FSharp.Core" Version="8.0.400" />
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.3.0" />
+  </ItemGroup>
+</Project>

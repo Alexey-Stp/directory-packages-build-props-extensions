@@ -206,7 +206,8 @@ public sealed class FullMigrationTests : IDisposable
         plan.HasUnresolvedConflicts.Should().BeTrue();
 
         var act = () => engine.Apply(plan);
-        act.Should().Throw<InvalidOperationException>();
+        act.Should().Throw<MigrationException>()
+            .Which.Code.Should().Be(ErrorCodes.UnresolvedConflicts);
     }
 
     private void CreateProjectFile(string relativePath, string content)

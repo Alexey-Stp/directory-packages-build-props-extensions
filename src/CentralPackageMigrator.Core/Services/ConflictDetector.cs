@@ -5,6 +5,8 @@ namespace CentralPackageMigrator.Core.Services;
 
 public sealed class ConflictDetector : IConflictDetector
 {
+    private const string CentralFileName = "Directory.Packages.props";
+
     private readonly ILogger<ConflictDetector> _logger;
 
     public ConflictDetector(ILogger<ConflictDetector> logger)
@@ -12,66 +14,37 @@ public sealed class ConflictDetector : IConflictDetector
         _logger = logger;
     }
 
-    public IReadOnlyList<ConflictGroup> DetectConflicts(IReadOnlyList<ProjectInfo> projects)
+    public IReadOnlyList<ConflictGroup> DetectConflicts(
+        IReadOnlyList<ProjectInfo> projects,
+        IReadOnlyDictionary<PackageIdentity, string>? existingCentralVersions = null)
     {
         ArgumentNullException.ThrowIfNull(projects);
 
-        // Collect all package references across all SDK-style projects,
-        // grouped by package identity
-        var allRefs = projects
-            .Where(p => p.IsSdkStyle)
-            .SelectMany(p => p.PackageReferences)
-            .Where(r => r.Version is not null && !r.IsUpdate)
-            .ToList();
-
-        var grouped = allRefs
-            .GroupBy(r => r.Package)
-            .ToList();
-
         var conflicts = new List<ConflictGroup>();
 
-        foreach (var group in grouped)
+        foreach (var group in PackageVersionAnalyzer.GroupCentralizable(projects))
         {
-            var versionGroups = group
-                .GroupBy(r => r.Version!, StringComparer.OrdinalIgnoreCase)
-                .ToList();
+            var references = group.ToList();
+            string? existing = null;
+            existingCentralVersions?.TryGetValue(group.Key, out existing);
 
-            if (versionGroups.Count <= 1)
+            var decision = PackageVersionAnalyzer.Decide(group.Key, references, existing);
+            if (decision.Kind != DecisionKind.Conflict)
             {
                 continue;
             }
 
-            var entries = versionGroups
-                .Select(vg => new ConflictEntry
-                {
-                    Version = vg.Key,
-                    Projects = vg
-                        .Select(r => r.ProjectRelativePath)
-                        .Distinct(StringComparer.OrdinalIgnoreCase)
-                        .OrderBy(p => p, StringComparer.OrdinalIgnoreCase)
-                        .ToList()
-                        .AsReadOnly()
-                })
-                .OrderByDescending(e => e.Projects.Count)
-                .ThenBy(e => e.Version, StringComparer.OrdinalIgnoreCase)
-                .ToList()
-                .AsReadOnly();
+            var conflict = PackageVersionAnalyzer.BuildConflict(group.Key, references, existing, CentralFileName);
 
-            var conflict = new ConflictGroup
-            {
-                Package = group.Key,
-                Entries = entries
-            };
-
-            _logger.LogWarning(
+            _logger.LogDebug(
                 "Version conflict for {Package}: {Versions}",
                 group.Key.Id,
-                string.Join(", ", entries.Select(e => $"{e.Version} ({e.Projects.Count} project(s))")));
+                string.Join(", ", conflict.Entries.Select(e => $"{e.Version} ({e.Projects.Count} file(s))")));
 
             conflicts.Add(conflict);
         }
 
-        _logger.LogInformation("Detected {Count} version conflict(s)", conflicts.Count);
+        _logger.LogDebug("Detected {Count} version conflict(s)", conflicts.Count);
         return conflicts
             .OrderBy(c => c.Package.Id, StringComparer.OrdinalIgnoreCase)
             .ToList()

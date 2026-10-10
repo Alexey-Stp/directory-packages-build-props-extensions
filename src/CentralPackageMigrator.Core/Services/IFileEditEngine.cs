@@ -3,17 +3,17 @@ using CentralPackageMigrator.Core.Models;
 namespace CentralPackageMigrator.Core.Services;
 
 /// <summary>
-/// Applies a migration plan to the file system.
-/// Creates new files and edits existing project files.
+/// The only component that writes to disk. Applies a <see cref="MigrationPlan"/>.
 /// </summary>
 public interface IFileEditEngine
 {
     /// <summary>
-    /// Applies the migration plan. Creates Directory.Packages.props
-    /// and removes Version attributes from .csproj files.
+    /// Validates and applies the plan. Every path must stay inside the solution root, every
+    /// edited file must match the hash it was planned from, and every edited file is re-parsed
+    /// and verified before anything is written. In dry-run mode all checks still run but
+    /// nothing is written. On a write failure, files already written are restored.
     /// </summary>
-    /// <param name="plan">The migration plan to apply.</param>
-    /// <param name="dryRun">If true, validates but does not write files.</param>
-    /// <returns>List of files that were (or would be) written.</returns>
-    IReadOnlyList<string> Apply(MigrationPlan plan, bool dryRun = false);
+    /// <returns>Relative paths of files written (or that would be written in dry-run mode).</returns>
+    /// <exception cref="MigrationException">On unresolved conflicts, invalid paths, stale plans or failed verification.</exception>
+    public IReadOnlyList<string> Apply(MigrationPlan plan, bool dryRun = false, CancellationToken cancellationToken = default);
 }

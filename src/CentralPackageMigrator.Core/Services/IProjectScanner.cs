@@ -3,12 +3,19 @@ using CentralPackageMigrator.Core.Models;
 namespace CentralPackageMigrator.Core.Services;
 
 /// <summary>
-/// Scans a solution root to find all .csproj files and determine their project style.
+/// Discovers project files (.csproj, .fsproj, .vbproj) and MSBuild import files
+/// (Directory.Build.props/.targets) under a solution root.
 /// </summary>
 public interface IProjectScanner
 {
     /// <summary>
-    /// Discovers all .csproj files under the solution root and classifies them.
+    /// Scans every project and import file under <paramref name="solutionRoot"/>, skipping
+    /// bin, obj, node_modules, packages, TestResults and hidden directories. When
+    /// <paramref name="solutionFilePath"/> is given, projects it lists outside the root are
+    /// also returned, flagged with <see cref="ProjectInfo.IsOutsideRoot"/>.
     /// </summary>
-    IReadOnlyList<ProjectInfo> ScanProjects(string solutionRoot);
+    public IReadOnlyList<ProjectInfo> ScanProjects(
+        string solutionRoot,
+        string? solutionFilePath = null,
+        CancellationToken cancellationToken = default);
 }

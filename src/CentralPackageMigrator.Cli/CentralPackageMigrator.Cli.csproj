@@ -7,6 +7,7 @@
     <Description>CLI tool for migrating .NET solutions to Central Package Management</Description>
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>cpm-migrate</ToolCommandName>
+    <PackageId>CentralPackageMigrator</PackageId>
   </PropertyGroup>
 
   <ItemGroup>

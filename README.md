@@ -12,13 +12,19 @@ Designed as the **single source of truth** for migration logic, reusable by VS C
 
 ## Features
 
-- **Automatic solution root detection** — finds nearest `.sln`, falls back to git root, then current directory
-- **Full PackageReference extraction** — `Version` attributes, nested `<Version>` elements, `Condition`, `PrivateAssets`, `IncludeAssets`, `Update=`
-- **Version conflict detection** — same package with different versions across projects, with explicit resolution
-- **Migration plan system** — JSON-based plan for IDE integration (analyze before applying)
-- **Dry-run mode** — preview changes without modifying files
+- **Automatic solution root detection** — finds the nearest `.sln`/`.slnx`, falls back to the git root, then the current directory. An explicit `--root` is used as-is.
+- **Every project under the root** — `.csproj`, `.fsproj` and `.vbproj`, plus `PackageReference` items in `Directory.Build.props`/`.targets` (`bin`, `obj`, `node_modules`, `packages`, `TestResults` and hidden directories are skipped)
+- **Full PackageReference extraction** — `Version` attributes in any position, nested `<Version>` elements, `Condition` (including on the enclosing `ItemGroup`), `PrivateAssets`, `IncludeAssets`, `VersionOverride`, `Update=`
+- **Formatting-preserving edits** — only the version text is removed; indentation, comments, attribute order, line endings and the UTF-8 BOM are kept
+- **Merges into an existing `Directory.Packages.props`** — existing entries, comments and properties are kept; mismatches become conflicts
+- **Semantic version comparison** — `1.0` and `1.0.0` are the same version; conflicts suggest the highest version
+- **Conditional versions** — per-condition versions that agree with each other become conditional `PackageVersion` items instead of conflicts
+- **Property-based versions** — `$(SerilogVersion)` is resolved from the project or the root `Directory.Build.props`
+- **Explicit conflict resolution** — conflicts are never auto-resolved
+- **Verified writes** — every edited file is re-parsed and checked before anything is written; a failed write rolls back the files already written
+- **Safe plan files** — a saved plan is only applied if a plan regenerated from the current files matches it exactly
+- **Dry-run mode** — runs every check without writing files
 - **Idempotent** — running twice produces no additional changes
-- **Legacy project detection** — warns about non-SDK-style projects
 - **Cross-platform** — Windows x64, Linux x64, macOS x64, macOS ARM64
 
 ---
@@ -36,7 +42,7 @@ cpm-migrate plan --json > plan.json
 cpm-migrate apply --dry-run
 cpm-migrate apply
 
-# 4. Verify the solution builds
+# 4. Verify the solution restores and builds
 cpm-migrate check --build
 ```
 
@@ -72,7 +78,7 @@ dotnet tool install -g CentralPackageMigrator
 
 ### `analyze`
 
-Scans the solution and reports findings without making changes.
+Scans the solution and reports projects, packages, conflicts and warnings without making changes.
 
 ```bash
 cpm-migrate analyze [--root <path>] [--json] [--verbose]
@@ -83,56 +89,69 @@ cpm-migrate analyze [--root <path>] [--json] [--verbose]
 Generates a complete migration plan. The plan is a JSON document describing all creates, edits, conflicts, and warnings.
 
 ```bash
-cpm-migrate plan [--root <path>] [--json] [--output plan.json] [--resolve Pkg=Version]
+cpm-migrate plan [--root <path>] [--json] [--output plan.json] [--resolve Pkg=Version]...
 ```
 
 ### `apply`
 
-Applies the migration: creates `Directory.Packages.props` and removes `Version` attributes from `.csproj` files.
+Applies the migration: creates or updates `Directory.Packages.props` and removes versions from project and import files.
 
 ```bash
-cpm-migrate apply [--root <path>] [--dry-run] [--json] [--resolve Pkg=Version] [--plan-file plan.json]
+cpm-migrate apply [--root <path>] [--dry-run] [--json] [--resolve Pkg=Version]...
+cpm-migrate apply [--root <path>] [--dry-run] [--json] --plan-file plan.json
 ```
+
+With `--plan-file`, the plan is regenerated from the current files using the resolutions recorded in the file, and applied only if it matches the saved plan exactly (`ERR_STALE_PLAN` otherwise). `--plan-file` cannot be combined with `--resolve`.
 
 ### `check`
 
-Verifies the migrated solution by running `dotnet restore` (and optionally `dotnet build`).
+Verifies the migrated solution by running `dotnet restore` (and optionally `dotnet build`) against the solution file, or the root directory when there is none.
 
 ```bash
-cpm-migrate check [--root <path>] [--build] [--json]
+cpm-migrate check [--root <path>] [--build] [--timeout <seconds>] [--json]
 ```
+
+`--timeout` applies to each `dotnet` command (default: 600).
 
 ### `resolve`
 
-Provides conflict resolutions and generates an updated plan.
+Provides conflict resolutions and outputs the updated plan. Equivalent to `plan` with at least one required `--resolve`.
 
 ```bash
 cpm-migrate resolve --resolve Newtonsoft.Json=13.0.3 [--resolve Serilog=3.1.1] [--output plan.json]
 ```
 
+Resolutions must be valid NuGet package IDs and versions (or ranges). Repeating a package with a different version is an error; a resolution for a package without a conflict produces warning `CPM009`.
+
 ---
 
 ## Global Options
 
-| Option      | Description                          |
-|-------------|--------------------------------------|
-| `--root`    | Solution root path (auto-detected)   |
-| `--json`    | Output as machine-readable JSON      |
-| `--verbose` | Verbose output                       |
-| `--dry-run` | Preview changes without writing      |
+These are accepted before or after the command name.
+
+| Option      | Description                                                        |
+|-------------|--------------------------------------------------------------------|
+| `--root`    | Solution root path, used as-is (auto-detected when omitted)        |
+| `--json`    | Machine-readable JSON on stdout; logs go to stderr                 |
+| `--verbose` | Verbose output and debug logs                                      |
 
 ---
 
 ## Exit Codes
 
-| Code | Meaning              |
-|------|----------------------|
-| 0    | Success              |
-| 1    | Analysis warnings    |
-| 2    | Unresolved conflicts |
-| 3    | Error                |
-| 4    | Invalid arguments    |
-| 5    | File system error    |
+`analyze`, `plan`, `resolve` and `apply` use the same rule: unresolved conflicts (2) take precedence over warnings (1). Warnings with severity `info` never change the exit code.
+
+| Code | Meaning                                               |
+|------|-------------------------------------------------------|
+| 0    | Success                                               |
+| 1    | Completed with warnings (severity `warning`)          |
+| 2    | Unresolved conflicts                                  |
+| 3    | Error (stale or invalid plan, failed verification)    |
+| 4    | Invalid arguments                                     |
+| 5    | File system error                                     |
+| 6    | `check`: `dotnet restore` or `dotnet build` failed    |
+
+In `--json` mode, failures write `{ "schemaVersion", "success": false, "error": { "code", "message", ... } }` to stdout. See [docs/JSON_SCHEMA.md](docs/JSON_SCHEMA.md) for error codes.
 
 ---
 
@@ -140,7 +159,7 @@ cpm-migrate resolve --resolve Newtonsoft.Json=13.0.3 [--resolve Serilog=3.1.1] [
 
 ```json
 {
-  "schemaVersion": "1.0",
+  "schemaVersion": "1.1",
   "timestamp": "2024-01-15T10:30:00+00:00",
   "solutionRoot": "/path/to/solution",
   "creates": [
@@ -153,9 +172,11 @@ cpm-migrate resolve --resolve Newtonsoft.Json=13.0.3 [--resolve Serilog=3.1.1] [
   "edits": [
     {
       "relativePath": "src/MyProject/MyProject.csproj",
+      "originalSha256": "9f2c...e1",
       "operations": [
         {
           "type": "removeVersion",
+          "line": 6,
           "packageId": "Newtonsoft.Json",
           "originalText": "13.0.3",
           "description": "Remove Version=\"13.0.3\" from Newtonsoft.Json"
@@ -183,7 +204,7 @@ cpm-migrate resolve --resolve Newtonsoft.Json=13.0.3 [--resolve Serilog=3.1.1] [
 
 ## IDE Integration
 
-This CLI is designed as the backend engine for IDE extensions. The JSON plan output (`--json`) follows a versioned schema (`schemaVersion: "1.0"`) that IDE adapters consume.
+This CLI is designed as the backend engine for IDE extensions. The JSON plan output (`--json`) follows a versioned schema (`schemaVersion: "1.1"`) that IDE adapters consume. .NET hosts can also reference `CentralPackageMigrator.Core` and call `IMigrationService` in-process.
 
 See [docs/JSON_SCHEMA.md](docs/JSON_SCHEMA.md) for the full contract specification.
 
@@ -216,6 +237,9 @@ dotnet build
 
 # Run tests
 dotnet test
+
+# Skip the end-to-end test that runs a real dotnet restore (needs NuGet access)
+dotnet test --filter "Category!=E2E"
 
 # Run the CLI locally
 dotnet run --project src/CentralPackageMigrator.Cli -- analyze

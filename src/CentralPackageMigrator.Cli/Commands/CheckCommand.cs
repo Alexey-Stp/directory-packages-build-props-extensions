@@ -1,230 +1,157 @@
 using System.CommandLine;
-using System.CommandLine.Invocation;
 using CentralPackageMigrator.Cli.Output;
 using CentralPackageMigrator.Core.Abstractions;
+using CentralPackageMigrator.Core.Models;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace CentralPackageMigrator.Cli.Commands;
 
 /// <summary>
 /// The "check" command: verifies the migration by running dotnet restore
-/// and optionally dotnet build.
+/// and optionally dotnet build against the solution file (or root directory).
 /// </summary>
-public static class CheckCommand
+internal static class CheckCommand
 {
-    public static Command Create()
+    private const int DefaultTimeoutSeconds = 600;
+
+    public static Command Create(CliContext context)
     {
         var command = new Command("check", "Verify migration by running dotnet restore and optionally dotnet build");
 
-        var rootOption = new Option<string?>(
-            "--root",
-            "Solution root path (defaults to current directory)");
-
-        var jsonOption = new Option<bool>(
-            "--json",
-            "Output results as JSON");
-
-        var verboseOption = new Option<bool>(
-            "--verbose",
-            "Show verbose output including full command output");
-
-        var buildOption = new Option<bool>(
-            "--build",
-            "Also run dotnet build after restore");
-
-        command.AddOption(rootOption);
-        command.AddOption(jsonOption);
-        command.AddOption(verboseOption);
-        command.AddOption(buildOption);
-
-        command.SetHandler(async (InvocationContext context) =>
+        var buildOption = new Option<bool>("--build")
         {
-            var root = context.ParseResult.GetValueForOption(rootOption);
-            var json = context.ParseResult.GetValueForOption(jsonOption);
-            var verbose = context.ParseResult.GetValueForOption(verboseOption);
-            var build = context.ParseResult.GetValueForOption(buildOption);
-            var serviceProvider = (IServiceProvider)context.BindingContext.GetService(typeof(IServiceProvider))!;
+            Description = "Also run dotnet build after restore"
+        };
 
-            context.ExitCode = await ExecuteAsync(root, json, verbose, build, serviceProvider,
-                context.GetCancellationToken());
+        var timeoutOption = new Option<int>("--timeout")
+        {
+            Description = "Timeout in seconds for each dotnet command",
+            DefaultValueFactory = _ => DefaultTimeoutSeconds
+        };
+        timeoutOption.Validators.Add(result =>
+        {
+            if (result.GetValueOrDefault<int>() <= 0)
+            {
+                result.AddError("--timeout must be a positive number of seconds.");
+            }
         });
+
+        command.Options.Add(buildOption);
+        command.Options.Add(timeoutOption);
+
+        command.SetAction((parseResult, cancellationToken) => CommandRunner.RunAsync(
+            parseResult,
+            context,
+            (scope, ct) => ExecuteAsync(
+                scope,
+                parseResult.GetValue(buildOption),
+                TimeSpan.FromSeconds(parseResult.GetValue(timeoutOption)),
+                ct),
+            cancellationToken));
 
         return command;
     }
 
     private static async Task<int> ExecuteAsync(
-        string? root,
-        bool json,
-        bool verbose,
+        CommandScope scope,
         bool build,
-        IServiceProvider services,
+        TimeSpan timeout,
         CancellationToken cancellationToken)
     {
-        var consoleRenderer = new ConsoleRenderer();
+        var solution = scope.Migration.LoadSolution(scope.CreateRequest(), cancellationToken);
+        var runner = scope.Services.GetRequiredService<IProcessRunner>();
 
-        try
+        // Target the solution file when there is one; a directory with several
+        // project or solution files makes `dotnet restore` fail with MSB1011.
+        var target = solution.SolutionFilePath is not null ? new[] { solution.SolutionFilePath } : [];
+        var steps = new List<CheckStep>();
+
+        var restore = await RunStepAsync(
+            scope, runner, "restore", ["restore", .. target], solution.RootPath, timeout, ErrorCodes.RestoreFailed, cancellationToken)
+            .ConfigureAwait(false);
+        steps.Add(restore);
+
+        if (build)
         {
-            var solutionRoot = root ?? Directory.GetCurrentDirectory();
-
-            if (!Directory.Exists(solutionRoot))
+            if (restore.Success)
             {
-                consoleRenderer.RenderError($"Directory not found: {solutionRoot}");
-                return ExitCodes.FileSystemError;
-            }
-
-            var processRunner = services.GetRequiredService<IProcessRunner>();
-            var overallSuccess = true;
-
-            // Run dotnet restore
-            if (!json)
-            {
-                Console.WriteLine();
-                Console.WriteLine("Running dotnet restore...");
-            }
-
-            var restoreResult = await processRunner.RunAsync(
-                "dotnet", "restore", solutionRoot, cancellationToken);
-
-            if (!json)
-            {
-                if (restoreResult.Success)
-                {
-                    var saved = Console.ForegroundColor;
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.Write("  PASS");
-                    Console.ForegroundColor = saved;
-                    Console.WriteLine(" dotnet restore succeeded.");
-                }
-                else
-                {
-                    var saved = Console.ForegroundColor;
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.Write("  FAIL");
-                    Console.ForegroundColor = saved;
-                    Console.WriteLine(" dotnet restore failed.");
-                    overallSuccess = false;
-                }
-
-                if (verbose || !restoreResult.Success)
-                {
-                    if (!string.IsNullOrWhiteSpace(restoreResult.StandardOutput))
-                    {
-                        Console.WriteLine();
-                        Console.WriteLine(restoreResult.StandardOutput);
-                    }
-
-                    if (!string.IsNullOrWhiteSpace(restoreResult.StandardError))
-                    {
-                        Console.Error.WriteLine(restoreResult.StandardError);
-                    }
-                }
-            }
-
-            if (!restoreResult.Success)
-                overallSuccess = false;
-
-            // Optionally run dotnet build
-            if (build)
-            {
-                if (!json)
-                {
-                    Console.WriteLine();
-                    Console.WriteLine("Running dotnet build...");
-                }
-
-                var buildResult = await processRunner.RunAsync(
-                    "dotnet", "build --no-restore", solutionRoot, cancellationToken);
-
-                if (!json)
-                {
-                    if (buildResult.Success)
-                    {
-                        var saved = Console.ForegroundColor;
-                        Console.ForegroundColor = ConsoleColor.Green;
-                        Console.Write("  PASS");
-                        Console.ForegroundColor = saved;
-                        Console.WriteLine(" dotnet build succeeded.");
-                    }
-                    else
-                    {
-                        var saved = Console.ForegroundColor;
-                        Console.ForegroundColor = ConsoleColor.Red;
-                        Console.Write("  FAIL");
-                        Console.ForegroundColor = saved;
-                        Console.WriteLine(" dotnet build failed.");
-                        overallSuccess = false;
-                    }
-
-                    if (verbose || !buildResult.Success)
-                    {
-                        if (!string.IsNullOrWhiteSpace(buildResult.StandardOutput))
-                        {
-                            Console.WriteLine();
-                            Console.WriteLine(buildResult.StandardOutput);
-                        }
-
-                        if (!string.IsNullOrWhiteSpace(buildResult.StandardError))
-                        {
-                            Console.Error.WriteLine(buildResult.StandardError);
-                        }
-                    }
-                }
-
-                if (!buildResult.Success)
-                    overallSuccess = false;
-            }
-
-            // JSON output
-            if (json)
-            {
-                var steps = new List<object>
-                {
-                    new { step = "restore", success = restoreResult.Success, exitCode = restoreResult.ExitCode }
-                };
-
-                if (build)
-                {
-                    // Re-run is not ideal; for JSON we capture above. Simplified: just report restore.
-                    // The build result was already captured above.
-                }
-
-                // Simple JSON output
-                Console.Write("{\"success\":");
-                Console.Write(overallSuccess ? "true" : "false");
-                Console.Write(",\"restore\":{\"exitCode\":");
-                Console.Write(restoreResult.ExitCode);
-                Console.Write(",\"success\":");
-                Console.Write(restoreResult.Success ? "true" : "false");
-                Console.Write("}");
-                Console.Write("}");
-                Console.WriteLine();
+                steps.Add(await RunStepAsync(
+                    scope, runner, "build", ["build", .. target, "--no-restore"], solution.RootPath, timeout, ErrorCodes.BuildFailed, cancellationToken)
+                    .ConfigureAwait(false));
             }
             else
             {
-                Console.WriteLine();
-                if (overallSuccess)
-                {
-                    var saved = Console.ForegroundColor;
-                    Console.ForegroundColor = ConsoleColor.Green;
-                    Console.WriteLine("All checks passed.");
-                    Console.ForegroundColor = saved;
-                }
-                else
-                {
-                    var saved = Console.ForegroundColor;
-                    Console.ForegroundColor = ConsoleColor.Red;
-                    Console.WriteLine("Some checks failed. Review the output above for details.");
-                    Console.ForegroundColor = saved;
-                }
-                Console.WriteLine();
+                steps.Add(new CheckStep { Name = "build", Success = false, Skipped = true });
+            }
+        }
+
+        bool success = steps.All(s => s.Success);
+
+        if (scope.Json)
+        {
+            scope.JsonOutput.Render(new CheckResult { Success = success, Steps = steps });
+        }
+        else
+        {
+            scope.Console.WriteLine();
+            scope.Console.WriteLine(success
+                ? "All checks passed."
+                : "Some checks failed. Review the output above for details.");
+            scope.Console.WriteLine();
+        }
+
+        return success ? ExitCodes.Success : ExitCodes.CheckFailed;
+    }
+
+    private static async Task<CheckStep> RunStepAsync(
+        CommandScope scope,
+        IProcessRunner runner,
+        string name,
+        string[] arguments,
+        string workingDirectory,
+        TimeSpan timeout,
+        string errorCode,
+        CancellationToken cancellationToken)
+    {
+        if (!scope.Json)
+        {
+            scope.Console.WriteLine();
+            scope.Console.WriteLine($"Running dotnet {name}...");
+        }
+
+        var result = await runner.RunAsync("dotnet", arguments, workingDirectory, timeout, cancellationToken)
+            .ConfigureAwait(false);
+
+        bool includeOutput = scope.Verbose || !result.Success;
+
+        if (!scope.Json)
+        {
+            scope.Console.RenderStatus(result.Success, result.TimedOut
+                ? $"dotnet {name} timed out after {timeout.TotalSeconds:0}s."
+                : $"dotnet {name} {(result.Success ? "succeeded" : "failed")}.");
+
+            if (includeOutput && !string.IsNullOrWhiteSpace(result.StandardOutput))
+            {
+                scope.Console.WriteLine();
+                scope.Console.WriteLine(result.StandardOutput);
             }
 
-            return overallSuccess ? ExitCodes.Success : ExitCodes.Error;
+            if (includeOutput && !string.IsNullOrWhiteSpace(result.StandardError))
+            {
+                scope.Console.RenderErrorDetail(result.StandardError);
+            }
         }
-        catch (Exception ex)
+
+        return new CheckStep
         {
-            consoleRenderer.RenderError(ex.Message);
-            return ExitCodes.Error;
-        }
+            Name = name,
+            Success = result.Success,
+            ExitCode = result.ExitCode,
+            TimedOut = result.TimedOut,
+            DurationMs = (long)result.Duration.TotalMilliseconds,
+            ErrorCode = result.Success ? null : errorCode,
+            StandardOutput = includeOutput ? result.StandardOutput : null,
+            StandardError = includeOutput ? result.StandardError : null
+        };
     }
 }

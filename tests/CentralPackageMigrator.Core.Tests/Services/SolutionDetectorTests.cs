@@ -1,6 +1,6 @@
 using CentralPackageMigrator.Core.Models;
 using CentralPackageMigrator.Core.Services;
-using CentralPackageMigrator.Core.Tests.TestHelpers;
+using CentralPackageMigrator.TestUtilities;
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Xunit;
@@ -111,5 +111,45 @@ public sealed class SolutionDetectorTests
     {
         var act = () => _sut.Detect("");
         act.Should().Throw<ArgumentException>();
+    }
+
+    [Fact]
+    public void Explicit_root_does_not_walk_up_to_a_parent_solution()
+    {
+        string root = Path.GetFullPath("/repo");
+        string subDir = Path.Combine(root, "src", "MyProject");
+        _fs.AddDirectory(subDir);
+        _fs.AddFile(Path.Combine(root, "MySolution.sln"), "");
+
+        var result = _sut.Detect(subDir, isExplicitRoot: true);
+
+        result.DetectionMethod.Should().Be(RootDetectionMethod.ExplicitPath);
+        result.RootPath.Should().Be(subDir);
+        result.SolutionFilePath.Should().BeNull();
+    }
+
+    [Fact]
+    public void Explicit_root_records_a_solution_file_directly_inside_it()
+    {
+        string root = Path.GetFullPath("/repo");
+        _fs.AddFile(Path.Combine(root, "MySolution.sln"), "");
+
+        var result = _sut.Detect(root, isExplicitRoot: true);
+
+        result.SolutionFilePath.Should().EndWith("MySolution.sln");
+    }
+
+    [Fact]
+    public void Finds_slnx_files()
+    {
+        string root = Path.GetFullPath("/repo");
+        string subDir = Path.Combine(root, "src");
+        _fs.AddDirectory(subDir);
+        _fs.AddFile(Path.Combine(root, "MySolution.slnx"), "<Solution />");
+
+        var result = _sut.Detect(subDir);
+
+        result.DetectionMethod.Should().Be(RootDetectionMethod.SolutionFile);
+        result.SolutionFilePath.Should().EndWith("MySolution.slnx");
     }
 }

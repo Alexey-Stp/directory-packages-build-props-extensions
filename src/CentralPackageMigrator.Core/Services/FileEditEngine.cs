@@ -1,14 +1,26 @@
-using System.Text.RegularExpressions;
 using System.Xml;
-using System.Xml.Linq;
 using CentralPackageMigrator.Core.Abstractions;
+using CentralPackageMigrator.Core.Editing;
 using CentralPackageMigrator.Core.Models;
+using CentralPackageMigrator.Core.Security;
 using Microsoft.Extensions.Logging;
 
 namespace CentralPackageMigrator.Core.Services;
 
 public sealed class FileEditEngine : IFileEditEngine
 {
+    private const string CentralFileName = "Directory.Packages.props";
+
+    private static readonly HashSet<string> EditableProjectExtensions = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ".csproj", ".fsproj", ".vbproj"
+    };
+
+    private static readonly HashSet<string> EditableImportFiles = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "Directory.Build.props", "Directory.Build.targets"
+    };
+
     private readonly IFileSystem _fileSystem;
     private readonly ILogger<FileEditEngine> _logger;
 
@@ -18,257 +30,212 @@ public sealed class FileEditEngine : IFileEditEngine
         _logger = logger;
     }
 
-    public IReadOnlyList<string> Apply(MigrationPlan plan, bool dryRun = false)
+    public IReadOnlyList<string> Apply(MigrationPlan plan, bool dryRun = false, CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(plan);
 
         if (plan.HasUnresolvedConflicts)
         {
-            throw new InvalidOperationException(
+            throw new MigrationException(
+                ErrorCodes.UnresolvedConflicts,
                 "Cannot apply plan with unresolved conflicts. Resolve all conflicts first.");
         }
 
-        var writtenFiles = new List<string>();
+        string root = _fileSystem.GetFullPath(plan.SolutionRoot);
 
-        // Validate all paths first (fail-fast)
-        ValidatePaths(plan);
+        // Compute and verify every file before writing any of them.
+        var pending = new List<PendingWrite>();
 
-        // Create new files
         foreach (var create in plan.Creates)
         {
-            string absolutePath = _fileSystem.Combine(plan.SolutionRoot, create.RelativePath);
+            cancellationToken.ThrowIfCancellationRequested();
+            string path = ResolvePath(root, create.RelativePath, isCreate: true);
 
+            if (_fileSystem.FileExists(path))
+            {
+                throw new MigrationException(
+                    ErrorCodes.StalePlan,
+                    $"'{create.RelativePath}' already exists; the plan is out of date. Regenerate it.",
+                    create.RelativePath);
+            }
+
+            EnsureWellFormed(create.Content, create.RelativePath);
+            pending.Add(new PendingWrite(create.RelativePath, path, create.Content, OriginalContent: null));
+        }
+
+        foreach (var edit in plan.Edits)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            string path = ResolvePath(root, edit.RelativePath, isCreate: false);
+            ValidateOperations(edit);
+
+            if (!_fileSystem.FileExists(path))
+            {
+                throw new MigrationException(
+                    ErrorCodes.StalePlan,
+                    $"File to edit no longer exists: '{edit.RelativePath}'. Regenerate the plan.",
+                    edit.RelativePath);
+            }
+
+            string original = _fileSystem.ReadAllText(path);
+            if (edit.OriginalSha256 is not null &&
+                !string.Equals(TextFormat.Sha256(original), edit.OriginalSha256, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new MigrationException(
+                    ErrorCodes.StalePlan,
+                    $"'{edit.RelativePath}' changed after the plan was created. Regenerate the plan.",
+                    edit.RelativePath);
+            }
+
+            string updated = XmlFileEditor.Apply(original, edit.Operations, edit.RelativePath);
+            pending.Add(new PendingWrite(edit.RelativePath, path, updated, original));
+        }
+
+        foreach (var write in pending)
+        {
             _logger.LogInformation(
                 "{Action} {Path}",
-                dryRun ? "[DRY-RUN] Would create" : "Creating",
-                create.RelativePath);
-
-            if (!dryRun)
-            {
-                _fileSystem.WriteAllText(absolutePath, create.Content);
-            }
-
-            writtenFiles.Add(create.RelativePath);
+                dryRun ? "[DRY-RUN] Would write" : "Writing",
+                write.RelativePath);
         }
 
-        // Apply edits to existing files
-        foreach (var edit in plan.Edits)
+        if (!dryRun)
         {
-            string absolutePath = _fileSystem.Combine(plan.SolutionRoot, edit.RelativePath);
-
-            _logger.LogInformation(
-                "{Action} {Path} ({Count} edit(s))",
-                dryRun ? "[DRY-RUN] Would edit" : "Editing",
-                edit.RelativePath,
-                edit.Operations.Count);
-
-            if (!dryRun)
-            {
-                ApplyProjectEdits(absolutePath, edit.Operations);
-            }
-
-            writtenFiles.Add(edit.RelativePath);
+            WriteAll(pending, cancellationToken);
         }
 
-        _logger.LogInformation(
-            "{Action} {Count} file(s)",
-            dryRun ? "[DRY-RUN] Would write" : "Wrote",
-            writtenFiles.Count);
-
-        return writtenFiles.AsReadOnly();
+        return pending.Select(p => p.RelativePath).ToList().AsReadOnly();
     }
 
-    private void ValidatePaths(MigrationPlan plan)
+    private void WriteAll(List<PendingWrite> pending, CancellationToken cancellationToken)
     {
-        string rootNormalized = _fileSystem.GetFullPath(plan.SolutionRoot);
-
-        // Validate all create paths
-        foreach (var create in plan.Creates)
-        {
-            string fullPath = _fileSystem.GetFullPath(
-                _fileSystem.Combine(plan.SolutionRoot, create.RelativePath));
-
-            ValidatePathSecurity(fullPath, rootNormalized, create.RelativePath);
-        }
-
-        // Validate all edit paths
-        foreach (var edit in plan.Edits)
-        {
-            string fullPath = _fileSystem.GetFullPath(
-                _fileSystem.Combine(plan.SolutionRoot, edit.RelativePath));
-
-            ValidatePathSecurity(fullPath, rootNormalized, edit.RelativePath);
-
-            if (!_fileSystem.FileExists(fullPath))
-            {
-                throw new FileNotFoundException(
-                    $"Project file not found for editing: {edit.RelativePath}", fullPath);
-            }
-        }
-    }
-
-    private static void ValidatePathSecurity(string fullPath, string rootNormalized, string relativePath)
-    {
-        // Directory traversal protection
-        if (!fullPath.StartsWith(rootNormalized, StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                $"Path traversal detected: '{relativePath}' resolves outside solution root");
-        }
-
-        // Block obviously dangerous patterns
-        if (relativePath.Contains("..", StringComparison.Ordinal))
-        {
-            throw new InvalidOperationException(
-                $"Path contains '..' segments: '{relativePath}'");
-        }
-    }
-
-    private void ApplyProjectEdits(string projectPath, IReadOnlyList<EditOperation> operations)
-    {
-        string content = _fileSystem.ReadAllText(projectPath);
-
-        // Use XML-aware editing to preserve formatting
-        XDocument doc;
+        var written = new List<PendingWrite>();
         try
         {
-            doc = XDocument.Parse(content, LoadOptions.PreserveWhitespace | LoadOptions.SetLineInfo);
+            foreach (var write in pending)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                _fileSystem.WriteAllText(write.AbsolutePath, write.Content);
+                written.Add(write);
+            }
         }
-        catch (XmlException ex)
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or OperationCanceledException)
         {
-            throw new InvalidOperationException(
-                $"Failed to parse project file '{projectPath}': {ex.Message}", ex);
+            RollBack(written);
+
+            if (ex is OperationCanceledException)
+            {
+                throw;
+            }
+
+            var failed = pending[written.Count];
+            throw new MigrationException(
+                ErrorCodes.FileWriteFailed,
+                $"Failed to write '{failed.RelativePath}'; {written.Count} already-written file(s) were restored.",
+                failed.RelativePath,
+                ex);
         }
-
-        if (doc.Root is null)
-        {
-            throw new InvalidOperationException($"Project file has no root element: '{projectPath}'");
-        }
-
-        // Process RemoveVersion operations
-        var removeVersionOps = operations
-            .Where(o => o.Type == EditOperationType.RemoveVersion && o.PackageId is not null)
-            .ToList();
-
-        foreach (var op in removeVersionOps)
-        {
-            RemoveVersionFromPackageReference(doc.Root, op.PackageId!);
-        }
-
-        // Save with preserved formatting
-        using var writer = new StringWriter();
-        var settings = new XmlWriterSettings
-        {
-            OmitXmlDeclaration = true,
-            Indent = true,
-            IndentChars = "  "
-        };
-
-        // We write by reconstructing from the XDocument to preserve structure
-        // but we use a string-based approach for better formatting preservation
-        string result = SavePreservingFormat(content, doc, removeVersionOps);
-        _fileSystem.WriteAllText(projectPath, result);
     }
 
-    private static void RemoveVersionFromPackageReference(XElement root, string packageId)
+    private void RollBack(List<PendingWrite> written)
     {
-        var pkgRefs = root
-            .Descendants()
-            .Where(e => e.Name.LocalName == "PackageReference")
-            .Where(e =>
-            {
-                string? id = e.Attribute("Include")?.Value ?? e.Attribute("Update")?.Value;
-                return string.Equals(id, packageId, StringComparison.OrdinalIgnoreCase);
-            })
-            .ToList();
-
-        foreach (var pkgRef in pkgRefs)
+        foreach (var write in Enumerable.Reverse(written))
         {
-            // Remove Version attribute if present
-            pkgRef.Attribute("Version")?.Remove();
-
-            // Remove nested Version element if present
-            var versionElements = pkgRef.Elements()
-                .Where(e => e.Name.LocalName == "Version")
-                .ToList();
-
-            foreach (var ve in versionElements)
+            try
             {
-                ve.Remove();
+                if (write.OriginalContent is null)
+                {
+                    _fileSystem.DeleteFile(write.AbsolutePath);
+                }
+                else
+                {
+                    _fileSystem.WriteAllText(write.AbsolutePath, write.OriginalContent);
+                }
+            }
+            catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+            {
+                _logger.LogError(ex, "Failed to roll back {Path}", write.RelativePath);
             }
         }
     }
 
     /// <summary>
-    /// Applies version removal via string manipulation to preserve original formatting.
-    /// Falls back to XDocument serialization if string approach fails.
+    /// Resolves a plan path to a full path, rejecting anything that is not a plain relative path
+    /// inside the root or is not a file type the migration is allowed to touch.
     /// </summary>
-    private static string SavePreservingFormat(
-        string originalContent,
-        XDocument modifiedDoc,
-        List<EditOperation> removeVersionOps)
+    private string ResolvePath(string root, string relativePath, bool isCreate)
     {
-        string result = originalContent;
-
-        foreach (var op in removeVersionOps.OrderByDescending(o => o.Line))
+        string? problem = PathSafety.ValidateRelativePath(relativePath);
+        if (problem is not null)
         {
-            if (op.PackageId is null)
-            {
-                continue;
-            }
-
-            // Try to remove Version="..." attribute via regex (safe for this specific pattern)
-            string escaped = Regex.Escape(op.PackageId);
-
-            // Pattern: PackageReference with Include/Update="PackageId" and Version="..."
-            // Remove the Version="..." attribute
-            string pattern = $@"(<PackageReference\s+(?:Include|Update)=""{escaped}"")\s+Version=""[^""]*""";
-            string replacement = "$1";
-            string updated = Regex.Replace(result, pattern, replacement, RegexOptions.IgnoreCase);
-
-            if (updated != result)
-            {
-                result = updated;
-                continue;
-            }
-
-            // Try alternate order: Version before Include
-            pattern = $@"(<PackageReference\s+)Version=""[^""]*""\s+((?:Include|Update)=""{escaped}"")";
-            replacement = "$1$2";
-            updated = Regex.Replace(result, pattern, replacement, RegexOptions.IgnoreCase);
-
-            if (updated != result)
-            {
-                result = updated;
-                continue;
-            }
-
-            // Try removing nested <Version>...</Version> element
-            pattern = $@"(\s*<Version>[^<]*</Version>\s*)";
-            // This is a fallback — we only apply it within the context of the right PackageReference
-            // For safety, we use the XDocument result if string manipulation fails
+            throw new MigrationException(ErrorCodes.InvalidPath, problem, relativePath);
         }
 
-        // If we have self-closing tags that lost all attributes except Include, ensure they stay self-closing
-        // Clean up any double spaces from attribute removal
-        result = Regex.Replace(result, @"  +", " ");
-        // But restore indentation (don't collapse leading spaces)
-        var lines = result.Split('\n');
-        for (int i = 0; i < lines.Length; i++)
+        string fullPath = _fileSystem.GetFullPath(_fileSystem.Combine(root, relativePath));
+        if (!PathSafety.IsUnderRoot(fullPath, root))
         {
-            string line = lines[i];
-            // Only collapse spaces that are clearly inside a tag (not leading whitespace)
-            int leadingSpaces = line.Length - line.TrimStart().Length;
-            string leading = line[..leadingSpaces];
-            string rest = line[leadingSpaces..];
-            // Collapse multiple spaces inside XML tags but not in content
-            if (rest.TrimStart().StartsWith('<'))
-            {
-                rest = Regex.Replace(rest, @"  +", " ");
-            }
-            lines[i] = leading + rest;
+            throw new MigrationException(
+                ErrorCodes.InvalidPath,
+                $"Path traversal detected: '{relativePath}' resolves outside solution root",
+                relativePath);
         }
 
-        return string.Join('\n', lines);
+        string fileName = _fileSystem.GetFileName(fullPath);
+        bool allowed = isCreate
+            ? string.Equals(fileName, CentralFileName, StringComparison.OrdinalIgnoreCase)
+            : string.Equals(fileName, CentralFileName, StringComparison.OrdinalIgnoreCase) ||
+              EditableImportFiles.Contains(fileName) ||
+              EditableProjectExtensions.Contains(Path.GetExtension(fileName));
+
+        if (!allowed)
+        {
+            throw new MigrationException(
+                ErrorCodes.InvalidPath,
+                $"The migration may not {(isCreate ? "create" : "edit")} '{relativePath}'.",
+                relativePath);
+        }
+
+        return fullPath;
     }
+
+    private static void ValidateOperations(FileEdit edit)
+    {
+        bool isCentralFile = string.Equals(
+            Path.GetFileName(edit.RelativePath), CentralFileName, StringComparison.OrdinalIgnoreCase);
+
+        foreach (var op in edit.Operations)
+        {
+            bool allowed = isCentralFile
+                ? op.Type is EditOperationType.AddPackageVersion
+                    or EditOperationType.UpdatePackageVersion
+                    or EditOperationType.EnableCentralPackageManagement
+                : op.Type is EditOperationType.RemoveVersion;
+
+            if (!allowed)
+            {
+                throw new MigrationException(
+                    ErrorCodes.InvalidPlanFile,
+                    $"Operation '{op.Type}' is not allowed on '{edit.RelativePath}'.",
+                    edit.RelativePath);
+            }
+        }
+    }
+
+    private static void EnsureWellFormed(string content, string relativePath)
+    {
+        try
+        {
+            _ = XmlSource.Parse(content);
+        }
+        catch (XmlException ex)
+        {
+            throw new MigrationException(
+                ErrorCodes.InvalidPlanFile,
+                $"Content for '{relativePath}' is not valid XML: {ex.Message}",
+                relativePath,
+                ex);
+        }
+    }
+
+    private sealed record PendingWrite(string RelativePath, string AbsolutePath, string Content, string? OriginalContent);
 }
