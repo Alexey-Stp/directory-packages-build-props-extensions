@@ -4,6 +4,7 @@
     <RootNamespace>CentralPackageMigrator.Core</RootNamespace>
     <AssemblyName>CentralPackageMigrator.Core</AssemblyName>
     <Description>Core domain logic for Central Package Management migration</Description>
+    <IsPackable>false</IsPackable>
   </PropertyGroup>
 
   <ItemGroup>

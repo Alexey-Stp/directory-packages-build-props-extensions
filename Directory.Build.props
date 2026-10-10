@@ -14,7 +14,35 @@
   <PropertyGroup>
     <Authors>CentralPackageMigrator Contributors</Authors>
     <Company>Open Source</Company>
-    <RepositoryType>git</RepositoryType>
     <Copyright>Copyright (c) CentralPackageMigrator Contributors</Copyright>
+    <PackageLicenseExpression>MIT</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/Alexey-Stp/directory-packages-build-props-extensions</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/Alexey-Stp/directory-packages-build-props-extensions</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+    <PublishRepositoryUrl>true</PublishRepositoryUrl>
   </PropertyGroup>
+
+  <!-- Versioning: the version comes only from the git tag (vX.Y.Z) via MinVer. -->
+  <PropertyGroup>
+    <MinVerTagPrefix>v</MinVerTagPrefix>
+    <MinVerDefaultPreReleaseIdentifiers>alpha.0</MinVerDefaultPreReleaseIdentifiers>
+    <!-- Keep the "version" option output equal to the package version (no "+commit" suffix). -->
+    <IncludeSourceRevisionInInformationalVersion>false</IncludeSourceRevisionInInformationalVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(GITHUB_ACTIONS)' == 'true'">
+    <ContinuousIntegrationBuild>true</ContinuousIntegrationBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="MinVer" PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- MinVer sets AssemblyVersion to Major.0.0.0; use the full version so assembly = package = version option output. -->
+  <Target Name="SetAssemblyVersionFromMinVer" AfterTargets="MinVer">
+    <PropertyGroup>
+      <AssemblyVersion>$(MinVerMajor).$(MinVerMinor).$(MinVerPatch).0</AssemblyVersion>
+      <FileVersion>$(MinVerMajor).$(MinVerMinor).$(MinVerPatch).0</FileVersion>
+    </PropertyGroup>
+  </Target>
 </Project>

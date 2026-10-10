@@ -8,7 +8,13 @@
     <PackAsTool>true</PackAsTool>
     <ToolCommandName>cpm-migrate</ToolCommandName>
     <PackageId>CentralPackageMigrator</PackageId>
+    <PackageReadmeFile>README.md</PackageReadmeFile>
+    <PackageTags>nuget;central-package-management;cpm;directory-packages-props;dotnet-tool;migration</PackageTags>
   </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="..\..\README.md" Pack="true" PackagePath="\" Visible="false" />
+  </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\CentralPackageMigrator.Core\CentralPackageMigrator.Core.csproj" />

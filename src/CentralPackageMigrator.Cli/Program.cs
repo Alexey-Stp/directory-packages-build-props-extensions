@@ -45,6 +45,12 @@ public static class Program
         rootCommand.Subcommands.Add(CheckCommand.Create(context));
         rootCommand.Subcommands.Add(ResolveCommand.Create(context));
 
+        // Report this tool's version, not the entry assembly's (which differs when hosted in-process).
+        foreach (var versionOption in rootCommand.Options.OfType<VersionOption>())
+        {
+            versionOption.Action = new ToolVersionAction();
+        }
+
         var parseResult = rootCommand.Parse(args);
         if (parseResult.Errors.Count > 0)
         {
