@@ -40,7 +40,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - `--root` is used as the root as-is, without walking up to a parent solution or repository.
 - Global options (`--root`, `--json`, `--verbose`) are accepted before or after the command.
 - `resolve --dry-run` is deprecated and hidden (it never had an effect).
-- Upgraded System.CommandLine to 2.0 stable. The .NET tool package ID is now explicitly `CentralPackageMigrator`.
+- Upgraded System.CommandLine from the 2022 pre-release `2.0.0-beta4.22272.1` to the stable `2.0.12`, pinned exactly in `Directory.Packages.props`. The .NET tool package ID is now explicitly `CentralPackageMigrator`.
 
 ## [0.1.0] - 2024-12-01
 

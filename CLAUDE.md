@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## What this is
 
-`cpm-migrate` — a .NET 8 CLI (System.CommandLine 2.0 beta4) that migrates .NET solutions to Central Package Management (`Directory.Packages.props`). It is meant to be the single migration engine behind IDE adapters (VS Code, Rider), which consume its versioned JSON plan output (`schemaVersion: "1.0"`, contract in [docs/JSON_SCHEMA.md](docs/JSON_SCHEMA.md)). Treat that JSON shape as a public contract: only add optional fields within a major version; never remove or change the meaning of existing ones.
+`cpm-migrate` — a .NET 8 CLI (System.CommandLine 2.0 stable) that migrates .NET solutions to Central Package Management (`Directory.Packages.props`). It is meant to be the single migration engine behind IDE adapters (VS Code, Rider), which consume its versioned JSON plan output (`schemaVersion: "1.1"`, contract in [docs/JSON_SCHEMA.md](docs/JSON_SCHEMA.md), JSON Schemas in [docs/schemas/](docs/schemas/)). Treat that JSON shape as a public contract: only add optional fields within a major version; never remove or change the meaning of existing ones. `JsonContractTests` fail on any shape change; an intentional change must bump `MigrationPlan.CurrentSchemaVersion`, the schemas and the approved snapshots in the same PR (see the compatibility rule in JSON_SCHEMA.md).
 
 ## Commands
 
@@ -23,7 +23,7 @@ dotnet run --project src/CentralPackageMigrator.Cli -- plan --json --root /path/
 dotnet run --project src/CentralPackageMigrator.Cli -- apply --dry-run --root /path/to/solution
 ```
 
-Build settings in [Directory.Build.props](Directory.Build.props) apply to every project: `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`, nullable enabled, `AnalysisLevel 8` — style/analyzer violations fail the build. This repo itself uses CPM: add package versions to [Directory.Packages.props](Directory.Packages.props) and leave `Version` off `PackageReference` in `.csproj` files. CI runs build+test on Ubuntu, Windows, and macOS, so path handling must be cross-platform.
+Build settings in [Directory.Build.props](Directory.Build.props) apply to every project: `TreatWarningsAsErrors`, `EnforceCodeStyleInBuild`, nullable enabled, `AnalysisLevel 8` — style/analyzer violations fail the build. This repo itself uses CPM: add package versions to [Directory.Packages.props](Directory.Packages.props) and leave `Version` off `PackageReference` in `.csproj` files. CI runs build+test on Ubuntu, Windows, and macOS, so path handling must be cross-platform. Versions come only from `vX.Y.Z` git tags via MinVer (never set `Version` by hand); `--version` prints the informational version, which equals the NuGet package version. Releasing is described in [docs/RELEASING.md](docs/RELEASING.md).
 
 ## Architecture
 
