@@ -46,6 +46,33 @@ jobs:
             exit 1
           fi
 
+  # The JSON contract (docs/JSON_SCHEMA.md) may only change together with a schemaVersion bump.
+  contract-guard:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - name: Require schemaVersion bump for contract changes
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          # Added files (a new snapshot scenario) do not change the contract; edits, deletions and renames do.
+          changed=$(git diff --name-only --diff-filter=MDR "$BASE_SHA"...HEAD -- docs/schemas tests/CentralPackageMigrator.Integration.Tests/Contract/approved)
+          if [ -z "$changed" ]; then
+            echo "JSON contract unchanged."
+            exit 0
+          fi
+          echo "JSON contract files changed:"
+          echo "$changed"
+          if git diff "$BASE_SHA"...HEAD -- src/CentralPackageMigrator.Core/Models/MigrationPlan.cs | grep -qE '^\+.*CurrentSchemaVersion = '; then
+            echo "MigrationPlan.CurrentSchemaVersion was bumped."
+          else
+            echo "::error::The JSON contract changed without bumping MigrationPlan.CurrentSchemaVersion. See docs/JSON_SCHEMA.md#compatibility-rule."
+            exit 1
+          fi
+
   format-check:
     runs-on: ubuntu-latest
     steps:

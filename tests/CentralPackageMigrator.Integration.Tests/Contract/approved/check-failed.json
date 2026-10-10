@@ -1,0 +1,24 @@
+{
+  "schemaVersion": "1.1",
+  "success": false,
+  "steps": [
+    {
+      "name": "restore",
+      "success": false,
+      "skipped": false,
+      "exitCode": 1,
+      "timedOut": false,
+      "durationMs": 1830,
+      "errorCode": "ERR_RESTORE_FAILED",
+      "standardOutput": "Determining projects to restore...",
+      "standardError": "error NU1008: Projects that use central package version management should not define the version on the PackageReference items"
+    },
+    {
+      "name": "build",
+      "success": false,
+      "skipped": true,
+      "timedOut": false,
+      "durationMs": 0
+    }
+  ]
+}

@@ -1,0 +1,15 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Alexey-Stp/directory-packages-build-props-extensions/main/docs/schemas/apply-result.schema.json",
+  "title": "cpm-migrate apply result",
+  "description": "Output of `apply --json` (with or without --dry-run). Contract version 1.1; see docs/JSON_SCHEMA.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "dryRun", "writtenFiles", "plan"],
+  "properties": {
+    "schemaVersion": { "const": "1.1" },
+    "dryRun": { "type": "boolean" },
+    "writtenFiles": { "type": "array", "items": { "type": "string" } },
+    "plan": { "$ref": "plan.schema.json" }
+  }
+}

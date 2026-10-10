@@ -1,0 +1,73 @@
+{
+  "schemaVersion": "1.1",
+  "timestamp": "2024-01-15T10:30:00+00:00",
+  "solutionRoot": "<ROOT>",
+  "creates": [],
+  "edits": [
+    {
+      "relativePath": "Directory.Packages.props",
+      "originalSha256": "c7974be2303a7332cb49a7ff3f33866ddc732c856d09f75c27858271bf83e21a",
+      "operations": [
+        {
+          "type": "enableCentralPackageManagement",
+          "line": 0,
+          "description": "Set ManagePackageVersionsCentrally to true"
+        },
+        {
+          "type": "addPackageVersion",
+          "line": 0,
+          "packageId": "Newtonsoft.Json",
+          "version": "13.0.3",
+          "description": "Add PackageVersion Newtonsoft.Json 13.0.3"
+        }
+      ]
+    },
+    {
+      "relativePath": "App.csproj",
+      "originalSha256": "8c903e9f067ba7146f4735e7e93b92a9923dac80ac5caa1206b63483fd1da23d",
+      "operations": [
+        {
+          "type": "removeVersion",
+          "line": 4,
+          "packageId": "Serilog",
+          "originalText": "3.1.1",
+          "description": "Remove Version=\u00223.1.1\u0022 from Serilog"
+        },
+        {
+          "type": "removeVersion",
+          "line": 3,
+          "packageId": "Newtonsoft.Json",
+          "originalText": "13.0.3",
+          "description": "Remove Version=\u002213.0.3\u0022 from Newtonsoft.Json"
+        }
+      ]
+    }
+  ],
+  "conflicts": [],
+  "warnings": [
+    {
+      "code": "CPM007",
+      "message": "An existing Directory.Packages.props was found; new versions will be merged into it",
+      "severity": "info"
+    },
+    {
+      "code": "CPM013",
+      "message": "ManagePackageVersionsCentrally is not enabled; it will be set to true in Directory.Packages.props",
+      "severity": "info"
+    }
+  ],
+  "stats": {
+    "totalProjects": 1,
+    "sdkStyleProjects": 1,
+    "legacyProjects": 0,
+    "totalPackageReferences": 2,
+    "uniquePackages": 2,
+    "conflictCount": 0,
+    "filesCreated": 0,
+    "filesModified": 2,
+    "versionsRemoved": 2
+  },
+  "hasUnresolvedConflicts": false,
+  "hasWarnings": false,
+  "isNoOp": false
+}

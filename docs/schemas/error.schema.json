@@ -1,0 +1,24 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Alexey-Stp/directory-packages-build-props-extensions/main/docs/schemas/error.schema.json",
+  "title": "cpm-migrate error",
+  "description": "Written to stdout by any command that fails in --json mode. Contract version 1.1; see docs/JSON_SCHEMA.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "success", "error"],
+  "properties": {
+    "schemaVersion": { "const": "1.1" },
+    "success": { "const": false },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^ERR_[A-Z_]+$" },
+        "message": { "type": "string" },
+        "detail": { "type": "string" },
+        "filePath": { "type": "string" }
+      }
+    }
+  }
+}
