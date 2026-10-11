@@ -5,7 +5,8 @@
     <DataCollectors>
       <DataCollector friendlyName="XPlat Code Coverage">
         <Configuration>
-          <Format>cobertura</Format>
+          <!-- cobertura feeds reportgenerator in ci.yml; opencover feeds SonarQube Cloud in sonar.yml. -->
+          <Format>cobertura,opencover</Format>
           <Exclude>[*.Tests]*,[CentralPackageMigrator.TestUtilities]*</Exclude>
           <ExcludeByAttribute>GeneratedCodeAttribute,CompilerGeneratedAttribute,ExcludeFromCodeCoverageAttribute</ExcludeByAttribute>
           <SkipAutoProps>true</SkipAutoProps>

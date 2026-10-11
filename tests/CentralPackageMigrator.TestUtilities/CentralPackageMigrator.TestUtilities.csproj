@@ -3,6 +3,8 @@
   <PropertyGroup>
     <IsPackable>false</IsPackable>
     <IsTestProject>false</IsTestProject>
+    <!-- Test helpers: analyze as test code so SonarQube Cloud does not count them as uncovered production code. -->
+    <SonarQubeTestProject>true</SonarQubeTestProject>
     <RootNamespace>CentralPackageMigrator.TestUtilities</RootNamespace>
   </PropertyGroup>
 
