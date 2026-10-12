@@ -18,7 +18,7 @@ namespace CentralPackageMigrator.Integration.Tests.Contract;
 /// <see cref="MigrationPlan.CurrentSchemaVersion"/> in the same PR (CI enforces the bump).
 /// Set CPM_UPDATE_CONTRACT=1 to rewrite the approved files after such a change.
 /// </summary>
-public sealed class JsonContractTests : IDisposable
+public sealed partial class JsonContractTests : IDisposable
 {
     private const string ContractChanged =
         "the JSON contract changed. If intentional, rerun with CPM_UPDATE_CONTRACT=1, update docs/schemas " +
@@ -126,11 +126,14 @@ public sealed class JsonContractTests : IDisposable
     public void Documented_full_example_is_a_valid_plan()
     {
         string markdown = File.ReadAllText(Path.Combine(ContractDirectory, "JSON_SCHEMA.md"));
-        var example = Regex.Match(markdown, @"## Full Example\s+```json\s*\n(?<json>.*?)\n```", RegexOptions.Singleline);
+        var example = FullExampleRegex().Match(markdown);
         example.Success.Should().BeTrue("docs/JSON_SCHEMA.md must contain a '## Full Example' json block");
 
         AssertValid("plan.schema.json", example.Groups["json"].Value, "docs/JSON_SCHEMA.md full example");
     }
+
+    [GeneratedRegex(@"## Full Example\s+```json\s*\n(?<json>.*?)\n```", RegexOptions.Singleline)]
+    private static partial Regex FullExampleRegex();
 
     private void AssertContract(string name, string schemaFile, string output)
     {

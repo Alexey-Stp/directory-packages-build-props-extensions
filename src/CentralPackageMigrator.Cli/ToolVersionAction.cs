@@ -10,11 +10,10 @@ namespace CentralPackageMigrator.Cli;
 /// </summary>
 internal sealed class ToolVersionAction : SynchronousCommandLineAction
 {
+    // The SDK always emits this attribute (MinVer sets its value), so no fallback is needed.
     public static string Version { get; } =
         typeof(ToolVersionAction).Assembly
-            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()?.InformationalVersion
-        ?? typeof(ToolVersionAction).Assembly.GetName().Version?.ToString()
-        ?? "0.0.0";
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!.InformationalVersion;
 
     public override int Invoke(ParseResult parseResult)
     {
