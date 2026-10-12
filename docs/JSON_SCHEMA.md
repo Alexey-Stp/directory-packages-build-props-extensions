@@ -23,6 +23,32 @@ Version 1.1 added optional fields (`originalSha256`, `version`, `condition`, `su
 
 IDE adapters should check `schemaVersion` and handle unknown fields gracefully (ignore them).
 
+## Machine-Readable Schemas
+
+The contract is published as JSON Schema (draft 2020-12) in [`docs/schemas/`](schemas/):
+
+| Output                                             | Schema                                                         |
+|----------------------------------------------------|----------------------------------------------------------------|
+| `analyze`, `plan`, `resolve`, `plan --output` file | [`plan.schema.json`](schemas/plan.schema.json)                 |
+| `apply` (with or without `--dry-run`)              | [`apply-result.schema.json`](schemas/apply-result.schema.json) |
+| `check`                                            | [`check-result.schema.json`](schemas/check-result.schema.json) |
+| Any failure                                        | [`error.schema.json`](schemas/error.schema.json)               |
+
+The schemas set `additionalProperties: false` so that the contract tests catch every new field. Consumers should still ignore unknown fields rather than validate strictly with these schemas: a later minor version may add optional fields.
+
+## Compatibility Rule
+
+The contract is frozen by `tests/CentralPackageMigrator.Integration.Tests/Contract/JsonContractTests.cs`. It validates every `--json` output against these schemas and compares it byte for byte with the approved snapshots in `Contract/approved/`. It also checks that the full example below is a valid plan.
+
+Any change to the JSON shape fails those tests. To make an intentional change, do all of the following in the same pull request:
+
+1. Bump `MigrationPlan.CurrentSchemaVersion`: minor for new optional fields, major for anything else.
+2. Update the `schemaVersion` const and the shape in `docs/schemas/*.schema.json`.
+3. Regenerate the approved snapshots with `CPM_UPDATE_CONTRACT=1 dotnet test tests/CentralPackageMigrator.Integration.Tests --filter "FullyQualifiedName~JsonContractTests"` and review the diff.
+4. Update this document.
+
+CI rejects a pull request that changes the schemas or the approved snapshots without changing `CurrentSchemaVersion`.
+
 ## Full Example
 
 ```json
@@ -40,6 +66,7 @@ IDE adapters should check `schemaVersion` and handle unknown fields gracefully (
   "edits": [
     {
       "relativePath": "src/AppA/AppA.csproj",
+      "originalSha256": "3e29d7d4f87adbce1a83f137c7755617032c7f1b047f35a6d85b5fd4bc520fef",
       "operations": [
         {
           "type": "removeVersion",
@@ -73,13 +100,14 @@ IDE adapters should check `schemaVersion` and handle unknown fields gracefully (
           "projects": ["src/AppB/AppB.csproj"]
         }
       ],
-      "resolvedVersion": null
+      "suggestedVersion": "13.0.3"
     }
   ],
   "warnings": [
     {
       "code": "CPM001",
       "message": "Legacy project format detected — will be skipped: src/Legacy/Legacy.csproj",
+      "severity": "warning",
       "projectPath": "src/Legacy/Legacy.csproj"
     }
   ],
@@ -93,9 +121,14 @@ IDE adapters should check `schemaVersion` and handle unknown fields gracefully (
     "filesCreated": 1,
     "filesModified": 3,
     "versionsRemoved": 8
-  }
+  },
+  "hasUnresolvedConflicts": true,
+  "hasWarnings": true,
+  "isNoOp": false
 }
 ```
+
+Optional fields whose value is `null` are omitted, never written as `null`. For example, `resolvedVersion` is absent until a conflict is resolved. Paths in `relativePath`, `projects`, `projectPath` and `writtenFiles` use the platform's directory separator. The serializer escapes `<`, `>`, `"` and `'` inside strings as `<`, `>`, `"` and `'`; this is equivalent JSON.
 
 ## Field Reference
 
@@ -114,6 +147,22 @@ IDE adapters should check `schemaVersion` and handle unknown fields gracefully (
 | `hasUnresolvedConflicts` | `bool`              | True if any conflict has no `resolvedVersion`      |
 | `hasWarnings`            | `bool`              | True if any warning has severity `warning`         |
 | `isNoOp`                 | `bool`              | True if there is nothing to create or edit         |
+
+### Stats
+
+All fields are non-negative integers.
+
+| Field                    | Description                                     |
+|--------------------------|-------------------------------------------------|
+| `totalProjects`          | Project files found under the root              |
+| `sdkStyleProjects`       | SDK-style projects (migrated)                   |
+| `legacyProjects`         | Legacy (non-SDK-style) projects (skipped)       |
+| `totalPackageReferences` | `PackageReference` items with a version         |
+| `uniquePackages`         | Distinct package IDs that will be centralized (excludes unresolved conflicts) |
+| `conflictCount`          | Packages referenced with more than one version  |
+| `filesCreated`           | Entries in `creates`                            |
+| `filesModified`          | Entries in `edits`                              |
+| `versionsRemoved`        | `removeVersion` operations across all edits     |
 
 ### FileCreate
 
@@ -179,6 +228,10 @@ A file that must not exist yet. An existing `Directory.Packages.props` is never 
 | `packageId`   | `string?` | Related package                                  |
 
 ## Other Outputs
+
+### `analyze --json`, `plan --json`, `resolve --json`
+
+All three write the plan object described above. `plan --output <file>` writes the same document to a file, which `apply --plan-file` accepts.
 
 ### `apply --json`
 

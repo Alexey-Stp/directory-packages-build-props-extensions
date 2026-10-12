@@ -1,0 +1,107 @@
+{
+  "schemaVersion": "1.1",
+  "timestamp": "2024-01-15T10:30:00+00:00",
+  "solutionRoot": "<ROOT>",
+  "creates": [
+    {
+      "relativePath": "Directory.Packages.props",
+      "content": "\u003CProject\u003E\n  \u003CPropertyGroup\u003E\n    \u003CManagePackageVersionsCentrally\u003Etrue\u003C/ManagePackageVersionsCentrally\u003E\n  \u003C/PropertyGroup\u003E\n\n  \u003CItemGroup\u003E\n    \u003CPackageVersion Include=\u0022Newtonsoft.Json\u0022 Version=\u002213.0.3\u0022 /\u003E\n    \u003CPackageVersion Include=\u0022Serilog\u0022 Version=\u00223.1.1\u0022 /\u003E\n    \u003CPackageVersion Include=\u0022System.ValueTuple\u0022 Version=\u00224.5.0\u0022 /\u003E\n  \u003C/ItemGroup\u003E\n\u003C/Project\u003E\n",
+      "description": "Central Package Management file with all package versions"
+    }
+  ],
+  "edits": [
+    {
+      "relativePath": "App.csproj",
+      "originalSha256": "3e29d7d4f87adbce1a83f137c7755617032c7f1b047f35a6d85b5fd4bc520fef",
+      "operations": [
+        {
+          "type": "removeVersion",
+          "line": 7,
+          "packageId": "System.ValueTuple",
+          "originalText": "4.5.0",
+          "description": "Remove Version=\u00224.5.0\u0022 from System.ValueTuple"
+        },
+        {
+          "type": "removeVersion",
+          "line": 4,
+          "packageId": "Serilog",
+          "originalText": "3.1.1",
+          "description": "Remove Version=\u00223.1.1\u0022 from Serilog"
+        },
+        {
+          "type": "removeVersion",
+          "line": 3,
+          "packageId": "Newtonsoft.Json",
+          "originalText": "13.0.3",
+          "description": "Remove Version=\u002213.0.3\u0022 from Newtonsoft.Json"
+        }
+      ]
+    },
+    {
+      "relativePath": "Lib.csproj",
+      "originalSha256": "b4e5feb0f803315dcfad52a6412ef9f0a770fdd7f11f11bd05f8a08b2f1006c1",
+      "operations": [
+        {
+          "type": "removeVersion",
+          "line": 4,
+          "packageId": "Serilog",
+          "originalText": "3.1.1",
+          "description": "Remove Version=\u00223.1.1\u0022 from Serilog"
+        },
+        {
+          "type": "removeVersion",
+          "line": 3,
+          "packageId": "Newtonsoft.Json",
+          "originalText": "12.0.3",
+          "description": "Remove Version=\u002212.0.3\u0022 from Newtonsoft.Json"
+        }
+      ]
+    }
+  ],
+  "conflicts": [
+    {
+      "package": {
+        "id": "Newtonsoft.Json"
+      },
+      "entries": [
+        {
+          "version": "12.0.3",
+          "projects": [
+            "Lib.csproj"
+          ]
+        },
+        {
+          "version": "13.0.3",
+          "projects": [
+            "App.csproj"
+          ]
+        }
+      ],
+      "resolvedVersion": "13.0.3",
+      "suggestedVersion": "13.0.3"
+    }
+  ],
+  "warnings": [
+    {
+      "code": "CPM004",
+      "message": "Conditional PackageReference for \u0027System.ValueTuple\u0027 in App.csproj with Condition=\u0027\u0027$(TargetFramework)\u0027 == \u0027net48\u0027\u0027; the version is centralized unconditionally",
+      "severity": "info",
+      "projectPath": "App.csproj",
+      "packageId": "System.ValueTuple"
+    }
+  ],
+  "stats": {
+    "totalProjects": 2,
+    "sdkStyleProjects": 2,
+    "legacyProjects": 0,
+    "totalPackageReferences": 5,
+    "uniquePackages": 3,
+    "conflictCount": 1,
+    "filesCreated": 1,
+    "filesModified": 2,
+    "versionsRemoved": 5
+  },
+  "hasUnresolvedConflicts": false,
+  "hasWarnings": false,
+  "isNoOp": false
+}

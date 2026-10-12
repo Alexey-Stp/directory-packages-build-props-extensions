@@ -1,0 +1,138 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Alexey-Stp/directory-packages-build-props-extensions/main/docs/schemas/plan.schema.json",
+  "title": "cpm-migrate migration plan",
+  "description": "Output of `analyze --json`, `plan --json` and `resolve --json`, and the content of `plan --output` files. Contract version 1.1; see docs/JSON_SCHEMA.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "timestamp",
+    "solutionRoot",
+    "creates",
+    "edits",
+    "conflicts",
+    "warnings",
+    "stats",
+    "hasUnresolvedConflicts",
+    "hasWarnings",
+    "isNoOp"
+  ],
+  "properties": {
+    "schemaVersion": { "const": "1.1" },
+    "timestamp": { "type": "string", "format": "date-time" },
+    "solutionRoot": { "type": "string", "minLength": 1 },
+    "creates": { "type": "array", "items": { "$ref": "#/$defs/fileCreate" } },
+    "edits": { "type": "array", "items": { "$ref": "#/$defs/fileEdit" } },
+    "conflicts": { "type": "array", "items": { "$ref": "#/$defs/conflictGroup" } },
+    "warnings": { "type": "array", "items": { "$ref": "#/$defs/warning" } },
+    "stats": { "$ref": "#/$defs/stats" },
+    "hasUnresolvedConflicts": { "type": "boolean" },
+    "hasWarnings": { "type": "boolean" },
+    "isNoOp": { "type": "boolean" }
+  },
+  "$defs": {
+    "fileCreate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relativePath", "content", "description"],
+      "properties": {
+        "relativePath": { "type": "string", "minLength": 1 },
+        "content": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "fileEdit": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["relativePath", "operations"],
+      "properties": {
+        "relativePath": { "type": "string", "minLength": 1 },
+        "originalSha256": { "type": "string", "pattern": "^[0-9a-f]{64}$" },
+        "operations": { "type": "array", "items": { "$ref": "#/$defs/editOperation" } }
+      }
+    },
+    "editOperation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["type", "line", "description"],
+      "properties": {
+        "type": {
+          "enum": ["removeVersion", "addPackageVersion", "updatePackageVersion", "enableCentralPackageManagement"]
+        },
+        "line": { "type": "integer", "minimum": 0 },
+        "packageId": { "type": "string" },
+        "originalText": { "type": "string" },
+        "version": { "type": "string" },
+        "condition": { "type": "string" },
+        "description": { "type": "string" }
+      }
+    },
+    "conflictGroup": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["package", "entries"],
+      "properties": {
+        "package": { "$ref": "#/$defs/packageIdentity" },
+        "entries": { "type": "array", "items": { "$ref": "#/$defs/conflictEntry" } },
+        "resolvedVersion": { "type": "string" },
+        "suggestedVersion": { "type": "string" }
+      }
+    },
+    "packageIdentity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["id"],
+      "properties": {
+        "id": { "type": "string", "minLength": 1 }
+      }
+    },
+    "conflictEntry": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["version", "projects"],
+      "properties": {
+        "version": { "type": "string" },
+        "projects": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "warning": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["code", "message", "severity"],
+      "properties": {
+        "code": { "type": "string", "pattern": "^CPM[0-9]{3}$" },
+        "message": { "type": "string" },
+        "severity": { "enum": ["warning", "info"] },
+        "projectPath": { "type": "string" },
+        "packageId": { "type": "string" }
+      }
+    },
+    "stats": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "totalProjects",
+        "sdkStyleProjects",
+        "legacyProjects",
+        "totalPackageReferences",
+        "uniquePackages",
+        "conflictCount",
+        "filesCreated",
+        "filesModified",
+        "versionsRemoved"
+      ],
+      "properties": {
+        "totalProjects": { "type": "integer", "minimum": 0 },
+        "sdkStyleProjects": { "type": "integer", "minimum": 0 },
+        "legacyProjects": { "type": "integer", "minimum": 0 },
+        "totalPackageReferences": { "type": "integer", "minimum": 0 },
+        "uniquePackages": { "type": "integer", "minimum": 0 },
+        "conflictCount": { "type": "integer", "minimum": 0 },
+        "filesCreated": { "type": "integer", "minimum": 0 },
+        "filesModified": { "type": "integer", "minimum": 0 },
+        "versionsRemoved": { "type": "integer", "minimum": 0 }
+      }
+    }
+  }
+}

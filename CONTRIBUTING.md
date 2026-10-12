@@ -10,8 +10,8 @@ Thank you for your interest in contributing to `cpm-migrate`.
 ## Building Locally
 
 ```bash
-git clone https://github.com/your-org/cpm-migrate.git
-cd cpm-migrate
+git clone https://github.com/Alexey-Stp/directory-packages-build-props-extensions.git
+cd directory-packages-build-props-extensions
 dotnet build
 ```
 
@@ -36,9 +36,13 @@ dotnet test --filter "Category!=E2E"
 # A single test
 dotnet test --filter "FullyQualifiedName~ExactOutputTests.Merges_new_versions_into_existing_Directory_Packages_props"
 
-# With coverage
-dotnet test --collect:"XPlat Code Coverage"
+# With coverage, merged into one report (same settings as CI)
+dotnet tool restore
+dotnet test --collect:"XPlat Code Coverage" --settings coverage.runsettings --results-directory TestResults
+dotnet reportgenerator "-reports:TestResults/**/coverage.cobertura.xml" "-targetdir:coverage" "-reporttypes:Html;TextSummary"
 ```
+
+CI fails if merged coverage measured on Linux drops below the `COVERAGE_MIN_LINE` / `COVERAGE_MIN_BRANCH` thresholds in [.github/workflows/ci.yml](.github/workflows/ci.yml), or if `dotnet format --verify-no-changes` reports any change.
 
 ## Running the CLI Locally
 
@@ -102,3 +106,8 @@ Prefer exact assertions on file content over `Contain(...)`: substring checks le
 - **New golden scenarios:** create a directory under `TestData/`, add project files, and add a test in `GoldenFileTests.cs` using `LoadScenario("your-scenario")`.
 - **Unit tests:** use `InMemoryFileSystem`, `FixedTimeProvider` and `Pipeline` from `tests/CentralPackageMigrator.TestUtilities`.
 - **CLI behaviour:** call `Program.RunAsync(args, stdout, stderr, configureServices, workingDirectory)` as in `CliContractTests`; substitute `IProcessRunner` through `configureServices`.
+- **JSON output:** `Contract/JsonContractTests` snapshots every `--json` output. A shape change must follow the [compatibility rule](docs/JSON_SCHEMA.md#compatibility-rule): bump the schema version, update `docs/schemas`, and regenerate the snapshots with `CPM_UPDATE_CONTRACT=1`.
+
+## Releasing
+
+Maintainers: see [docs/RELEASING.md](docs/RELEASING.md).
