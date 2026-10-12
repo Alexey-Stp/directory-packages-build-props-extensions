@@ -53,7 +53,7 @@ A new certificate starts with little SmartScreen reputation. Reputation builds a
 2. In App Store Connect → Users and Access → Integrations, create an **App Store Connect API key** with the Developer role and download the `.p8`.
 3. Add these repository **secrets**:
    - `MACOS_CERT_P12_BASE64`: `base64 -i cert.p12`
-   - `MACOS_CERT_PASSWORD`
+   - `MACOS_CERT_P12_SECRET`: the passphrase you set when exporting the `.p12`
    - `APPLE_API_KEY_P8_BASE64`: `base64 -i AuthKey_XXXX.p8`
    - `APPLE_API_KEY_ID`
    - `APPLE_API_ISSUER_ID`
