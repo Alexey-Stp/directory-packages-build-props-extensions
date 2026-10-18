@@ -1,3 +1,4 @@
+using System.Reflection;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using CentralPackageMigrator.Cli;
@@ -212,6 +213,20 @@ public sealed class CliContractTests : IDisposable
         await RunAsync(["check", "--root", _root], runner);
 
         runner.Calls.Single().Should().Equal("restore", solution);
+    }
+
+    [Fact]
+    public async Task Version_option_prints_the_informational_version_of_the_tool()
+    {
+        string expected = typeof(Program).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()!
+            .InformationalVersion;
+
+        var result = await RunAsync(["--version"]);
+
+        result.ExitCode.Should().Be(ExitCodes.Success);
+        result.Output.Trim().Should().Be(expected);
+        expected.Should().NotContain("+", "the version must equal the package version exactly");
     }
 
     private void WriteProject(string name, params (string Id, string Version)[] packages)

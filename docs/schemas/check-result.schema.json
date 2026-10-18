@@ -1,0 +1,32 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://raw.githubusercontent.com/Alexey-Stp/directory-packages-build-props-extensions/main/docs/schemas/check-result.schema.json",
+  "title": "cpm-migrate check result",
+  "description": "Output of `check --json`. Contract version 1.1; see docs/JSON_SCHEMA.md.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schemaVersion", "success", "steps"],
+  "properties": {
+    "schemaVersion": { "const": "1.1" },
+    "success": { "type": "boolean" },
+    "steps": { "type": "array", "items": { "$ref": "#/$defs/checkStep" } }
+  },
+  "$defs": {
+    "checkStep": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "success", "skipped", "timedOut", "durationMs"],
+      "properties": {
+        "name": { "enum": ["restore", "build"] },
+        "success": { "type": "boolean" },
+        "skipped": { "type": "boolean" },
+        "exitCode": { "type": "integer" },
+        "timedOut": { "type": "boolean" },
+        "durationMs": { "type": "integer", "minimum": 0 },
+        "errorCode": { "type": "string", "pattern": "^ERR_[A-Z_]+$" },
+        "standardOutput": { "type": "string" },
+        "standardError": { "type": "string" }
+      }
+    }
+  }
+}

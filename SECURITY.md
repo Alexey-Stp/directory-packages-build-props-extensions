@@ -10,7 +10,7 @@
 
 3. **Arbitrary file deletion** — The tool never deletes files. It only creates `Directory.Packages.props` and edits existing `.csproj` files by removing `Version` attributes.
 
-4. **Supply chain** — Downloaded binaries could be tampered with. Mitigation: Every release includes `SHA256SUMS.txt` for checksum verification.
+4. **Supply chain** — Downloaded binaries could be tampered with. Mitigation: Every release includes `SHA256SUMS.txt` for checksum verification and a GitHub build-provenance attestation for each binary and the NuGet package. Windows binaries are Authenticode-signed; macOS binaries are Developer ID-signed and notarized. Release tags never publish unsigned Windows or macOS binaries.
 
 ## File Write Policy
 
@@ -33,7 +33,7 @@ All file paths go through validation:
 If you discover a security vulnerability, please report it privately:
 
 1. **Do not** open a public issue
-2. Email: security@your-org.com (or use GitHub Security Advisories)
+2. Report it through [GitHub private vulnerability reporting](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/security/advisories/new)
 3. Include: description, reproduction steps, impact assessment
 4. We will respond within 48 hours
 

@@ -1,0 +1,9 @@
+{
+  "schemaVersion": "1.1",
+  "success": false,
+  "error": {
+    "code": "ERR_NO_PROJECTS_FOUND",
+    "message": "No project files (.csproj, .fsproj, .vbproj) found under <ROOT>",
+    "filePath": "<ROOT>"
+  }
+}

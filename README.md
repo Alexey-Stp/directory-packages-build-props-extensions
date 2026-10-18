@@ -1,7 +1,7 @@
 # cpm-migrate — Central Package Management Migration Tool
 
-[![CI](https://github.com/your-org/cpm-migrate/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/cpm-migrate/actions/workflows/ci.yml)
-[![Release](https://github.com/your-org/cpm-migrate/actions/workflows/release.yml/badge.svg)](https://github.com/your-org/cpm-migrate/releases)
+[![CI](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/actions/workflows/ci.yml/badge.svg)](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/actions/workflows/ci.yml)
+[![Release](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/actions/workflows/release.yml/badge.svg)](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/releases)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
 
 A production-grade CLI tool that migrates .NET solutions to [Central Package Management](https://learn.microsoft.com/nuget/consume-packages/central-package-management) (`Directory.Packages.props`).
@@ -52,7 +52,7 @@ cpm-migrate check --build
 
 ### Download Binary (Recommended)
 
-Download the self-contained binary for your platform from [GitHub Releases](https://github.com/your-org/cpm-migrate/releases):
+Download the self-contained binary for your platform from [GitHub Releases](https://github.com/Alexey-Stp/directory-packages-build-props-extensions/releases):
 
 | Platform     | Binary                      |
 |--------------|-----------------------------|
@@ -61,15 +61,27 @@ Download the self-contained binary for your platform from [GitHub Releases](http
 | macOS x64    | `cpm-migrate-osx-x64`       |
 | macOS ARM64  | `cpm-migrate-osx-arm64`     |
 
-Verify the checksum:
+The Windows binary is Authenticode-signed and the macOS binaries are signed with a Developer ID and notarized by Apple, so SmartScreen and Gatekeeper accept them. macOS checks notarization online the first time the binary runs.
+
+Verify the checksum (from the folder containing the downloaded binary and `SHA256SUMS.txt`):
 ```bash
-sha256sum -c SHA256SUMS.txt
+sha256sum -c --ignore-missing SHA256SUMS.txt
 ```
+
+Optionally verify the build provenance with the [GitHub CLI](https://cli.github.com/):
+```bash
+gh attestation verify cpm-migrate-linux-x64 --repo Alexey-Stp/directory-packages-build-props-extensions
+```
+
+On Linux and macOS, make the binary executable with `chmod +x` and check it with `./cpm-migrate-<platform> --version`.
 
 ### .NET Tool
 
+Requires the .NET 8 SDK or later.
+
 ```bash
 dotnet tool install -g CentralPackageMigrator
+cpm-migrate --version
 ```
 
 ---
@@ -229,8 +241,8 @@ IDE Extension                    CLI Engine
 ## Building from Source
 
 ```bash
-git clone https://github.com/your-org/cpm-migrate.git
-cd cpm-migrate
+git clone https://github.com/Alexey-Stp/directory-packages-build-props-extensions.git
+cd directory-packages-build-props-extensions
 
 # Build
 dotnet build
